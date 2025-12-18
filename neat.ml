@@ -54,8 +54,6 @@ module InnovationManager = struct
     | Some c -> c
 end
 
-(* TODO : Implement the reconstruciton of a genome from a genotype, at least partially for the crossover function *)
-
 let reconstruct_nodes (child_conns : connection_gene list) (p1 : genome)
     (p2 : genome) : node_gene list =
   let expected_size = List.length p1.nodes + List.length p2.nodes in
@@ -79,7 +77,6 @@ let reconstruct_nodes (child_conns : connection_gene list) (p1 : genome)
       node_lookup IntSet.empty
   in
 
-  (* On ajoute les nœuds mentionnés dans les nouvelles connexions *)
   let required_ids =
     List.fold_left
       (fun acc_set conn ->
@@ -87,8 +84,6 @@ let reconstruct_nodes (child_conns : connection_gene list) (p1 : genome)
       initial_set child_conns
   in
 
-  (* 3. CONSTRUCTION DE LA LISTE FINALE *)
-  (* On transforme le Set d'IDs en liste de NodeGene grâce à la Hashtbl *)
   let child_nodes =
     IntSet.fold
       (fun id acc_list ->
@@ -209,20 +204,18 @@ let mutate_topology g mod_type innov_global =
       }
   | Node ->
       let enabled_conns = List.filter (fun c -> c.enabled) g.connections in
-      if enabled_conns = [] then g (* Pas de mutation possible *)
+      if enabled_conns = [] then g
       else
         let target_conn =
           List.nth enabled_conns (Random.int (List.length enabled_conns))
         in
 
-        (* On crée la nouvelle liste où target_conn est désactivée *)
         let new_connections_list =
           List.map
             (fun c -> if c = target_conn then { c with enabled = false } else c)
             g.connections
         in
 
-        (* On récupère les IDs via InnovationManager (Ton code était bon ici) *)
         let new_id =
           InnovationManager.get_innov_id innov_global target_conn.in_node
             target_conn.out_node Node
@@ -236,7 +229,6 @@ let mutate_topology g mod_type innov_global =
             target_conn.out_node Connexion
         in
 
-        (* Création des nouveaux gènes (Ton code était bon ici) *)
         let new_conn_in =
           {
             in_node = target_conn.in_node;
@@ -259,7 +251,6 @@ let mutate_topology g mod_type innov_global =
 
         {
           connections = new_connections_list @ [ new_conn_in; new_conn_out ];
-          (* On utilise la liste modifiée ! *)
           nodes = g.nodes @ [ new_node ];
           fitness = g.fitness;
         }
