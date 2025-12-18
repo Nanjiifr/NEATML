@@ -1,0 +1,29 @@
+# --- OCaml / Dune ---
+# C'est le plus important : le dossier de compilation temporaire
+_build/
+
+# Fichiers de configuration IDE générés automatiquement (Merlin)
+.merlin
+
+# Si tu installes des dépendances localement
+_opam/
+/esy.lock/
+
+# Fichiers générés par opam lock (optionnel, souvent ignoré pour les projets simples)
+*.opam.locked
+
+# --- Fichiers Binaires / Compilation Manuelle ---
+# Au cas où tu compiles à la main sans Dune (ex: ocamlc ...)
+*.cmo
+*.cmi
+*.cmx
+*.cma
+*.cmxa
+*.o
+*.a
+*.exe
+*.out
+
+*~
+*.swp
+\#*#
