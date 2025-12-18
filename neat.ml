@@ -22,6 +22,20 @@ type genome = {
   fitness : float;
 }
 
+type incoming_link = { source_id : int; weight : float }
+
+type neuron = {
+  kind : node_type;
+  incoming : incoming_link list;
+  mutable value : float;
+}
+
+type network = {
+  neuron_map : (int, neuron) Hashtbl.t;
+  inputs : int list;
+  outputs : int list;
+}
+
 module InnovationManager = struct
   type t = {
     curr : innovation_id ref;
@@ -44,14 +58,9 @@ end
 
 let reconstruct_nodes (child_conns : connection_gene list) (p1 : genome)
     (p2 : genome) : node_gene list =
-  (* 1. CRÉATION DE LA TABLE DE RECHERCHE (Lookup Table) *)
-  (* Taille estimée : somme des nœuds des deux parents *)
   let expected_size = List.length p1.nodes + List.length p2.nodes in
   let node_lookup = Hashtbl.create expected_size in
 
-  (* Fonction pour remplir la table. 
-     Hashtbl.replace permet de gérer les doublons sans erreur :
-     si l'ID existe déjà (car présent chez les 2 parents), on le met juste à jour. *)
   let add_to_table genome =
     List.iter
       (fun node -> Hashtbl.replace node_lookup node.id node)
@@ -61,12 +70,9 @@ let reconstruct_nodes (child_conns : connection_gene list) (p1 : genome)
   add_to_table p1;
   add_to_table p2;
 
-  (* 2. IDENTIFICATION DES NOEUDS REQUIS *)
-  (* On commence par récupérer les Inputs/Outputs qui doivent toujours être présents *)
-  (* On peut parcourir la Hashtbl directement pour ça *)
   let initial_set =
     Hashtbl.fold
-      (fun id node acc_set ->
+      (fun id (node : node_gene) acc_set ->
         match node.kind with
         | Sensor | Output -> IntSet.add id acc_set
         | Hidden -> acc_set)
@@ -123,7 +129,7 @@ let crossover g1 g2 =
 let mutate_weights g =
   let conn =
     List.map
-      (fun c ->
+      (fun (c : connection_gene) ->
         let seed = Random.int 100 in
         if seed < 80 then
           let curr_weight = c.weight in
@@ -266,3 +272,84 @@ let mutate g innov_global =
     else new_genome
   in
   modified_gemome
+
+let compatibility_distance g1 g2 =
+  let c1 = 1. and c2 = 1. and c3 = 0.4 in
+  let n =
+    float (max (List.length g1.connections) (List.length g2.connections))
+  in
+  let rec aux gene1 gene2 =
+    match (gene1, gene2) with
+    | [], [] -> 0.
+    | _ :: t, [] -> (c1 /. n) +. aux t []
+    | [], _ :: t -> (c1 /. n) +. aux [] t
+    | h1 :: t1, h2 :: t2 ->
+        if h1.innov = h2.innov then
+          (c3 *. abs_float (h1.weight -. h2.weight)) +. aux t1 t2
+        else if h1.innov < h2.innov then (c2 /. n) +. aux t1 gene2
+        else (c2 /. n) +. aux gene1 t2
+  in
+  aux g1.connections g2.connections
+
+let sigmoid x = 1. /. (1. +. exp (-4.9 *. x))
+
+let create_phenotype g =
+  let neuron_map = Hashtbl.create 16 in
+  let inputs = ref [] and outputs = ref [] in
+  List.iter
+    (fun (n : node_gene) ->
+      let new_neuron = { kind = n.kind; incoming = []; value = 0. } in
+      Hashtbl.add neuron_map n.id new_neuron;
+      if n.kind = Output then outputs := n.id :: !outputs;
+      if n.kind = Sensor then inputs := n.id :: !inputs)
+    g.nodes;
+  inputs := List.sort compare !inputs;
+  outputs := List.sort compare !outputs;
+  List.iter
+    (fun (c : connection_gene) ->
+      if c.enabled then begin
+        let existing = Hashtbl.find neuron_map c.out_node in
+        let new_link = { source_id = c.in_node; weight = c.weight } in
+        let new_neuron =
+          {
+            kind = existing.kind;
+            incoming = new_link :: existing.incoming;
+            value = existing.value;
+          }
+        in
+        Hashtbl.replace neuron_map c.out_node new_neuron
+      end)
+    g.connections
+
+let predict nn ninputs =
+  let epochs = 5 in
+  if List.length ninputs <> List.length nn.inputs then
+    failwith "Predict : wrong input size\n";
+  List.iter2
+    (fun i v -> (Hashtbl.find nn.neuron_map i).value <- v)
+    nn.inputs ninputs;
+  for i = 0 to epochs - 1 do
+    let temp_values = ref [] in
+    Hashtbl.iter
+      (fun i (n : neuron) ->
+        if n.kind <> Sensor then begin
+          let sum =
+            List.fold_left
+              (fun acc v ->
+                let source = v.source_id and weight = v.weight in
+                let curr_value = (Hashtbl.find nn.neuron_map source).value in
+                acc +. (curr_value *. weight))
+              0. n.incoming
+          in
+          let activated = sigmoid sum in
+          temp_values := (i, activated) :: !temp_values
+        end)
+      nn.neuron_map;
+    List.iter
+      (fun (i, v) -> (Hashtbl.find nn.neuron_map i).value <- v)
+      !temp_values
+  done;
+  List.rev
+    (List.fold_left
+       (fun acc i -> (Hashtbl.find nn.neuron_map i).value :: acc)
+       [] nn.outputs)
