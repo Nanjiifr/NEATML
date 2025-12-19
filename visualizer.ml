@@ -14,13 +14,15 @@ let color_bg = white
 
 (* --- CALCUL DES POSITIONS --- *)
 (* Retourne une Hashtbl : Node_ID -> (x, y) *)
-let calculate_positions (nodes: node_gene list) =
+let calculate_positions (nodes : node_gene list) =
   let positions = Hashtbl.create (List.length nodes) in
 
   (* Séparer les types de noeuds *)
-  let (sensors: node_gene list) = List.filter (fun (n: node_gene) -> n.kind = Sensor) nodes in
-  let outputs = List.filter (fun (n: node_gene) -> n.kind = Output) nodes in
-  let hidden = List.filter (fun (n: node_gene) -> n.kind = Hidden) nodes in
+  let (sensors : node_gene list) =
+    List.filter (fun (n : node_gene) -> n.kind = Sensor) nodes
+  in
+  let outputs = List.filter (fun (n : node_gene) -> n.kind = Output) nodes in
+  let hidden = List.filter (fun (n : node_gene) -> n.kind = Hidden) nodes in
 
   (* Fonction pour distribuer verticalement une liste de noeuds à une position X donnée *)
   let distribute_vertical x_pos node_list =
@@ -57,15 +59,10 @@ let calculate_positions (nodes: node_gene list) =
 
 (* --- DESSIN --- *)
 let draw_genome genome =
-  (* Initialisation graphiques *)
-  open_graph (" " ^ string_of_int width ^ "x" ^ string_of_int height);
-  set_window_title "NEAT Visualizer";
-  set_color color_bg;
-  fill_rect 0 0 width height;
-
+  clear_graph ();
   let positions = calculate_positions genome.nodes in
 
-  (* 1. Dessiner les connexions *)
+  (* --- 1. DESSINER LES CONNEXIONS ET LES POIDS --- *)
   List.iter
     (fun conn ->
       try
@@ -74,61 +71,78 @@ let draw_genome genome =
 
         if not conn.enabled then (
           (* Connexion désactivée en Gris *)
-          set_color (rgb 200 200 200);
+          set_color (rgb 220 220 220);
           set_line_width 1;
           moveto x1 y1;
           lineto x2 y2)
         else (
-          (* Connexion active : Couleur selon le signe *)
-          if conn.weight >= 0. then set_color (rgb 0 180 0) (* Vert foncé *)
+          (* Couleur selon le signe *)
+          if conn.weight >= 0. then set_color (rgb 0 180 0) (* Vert *)
           else set_color (rgb 180 0 0);
 
-          (* Rouge foncé *)
+          (* Rouge *)
 
-          (* Épaisseur selon la force du poids (clampé entre 1 et 5 pixels) *)
+          (* Épaisseur *)
           let thickness =
             int_of_float (min 5.0 (max 1.0 (abs_float conn.weight)))
           in
           set_line_width thickness;
           moveto x1 y1;
-          lineto x2 y2)
-      with Not_found ->
-        () (* Si un noeud manque (ne devrait pas arriver), on ignore *))
+          lineto x2 y2;
+
+          (* Affichage du poids (avec fond blanc) *)
+          let mid_x = (x1 + x2) / 2 in
+          let mid_y = (y1 + y2) / 2 in
+          let weight_str = Printf.sprintf "%.2f" conn.weight in
+          let w_text, h_text = text_size weight_str in
+
+          set_color white;
+          fill_rect (mid_x - (w_text / 2)) (mid_y - (h_text / 2)) w_text h_text;
+
+          set_color black;
+          moveto (mid_x - (w_text / 2)) (mid_y - (h_text / 2));
+          draw_string weight_str)
+      with Not_found -> ())
     genome.connections;
 
-  (* 2. Dessiner les noeuds *)
+  (* --- 2. DESSINER LES NOEUDS --- *)
   List.iter
     (fun node ->
       try
         let x, y = Hashtbl.find positions node.id in
-
-        (* Choix de la couleur *)
         let c =
           match node.kind with
           | Sensor -> color_sensor
           | Output -> color_output
           | Hidden -> color_hidden
         in
-
-        (* Cercle rempli *)
         set_color c;
         fill_circle x y node_radius;
-
-        (* Contour noir *)
         set_color black;
         set_line_width 1;
         draw_circle x y node_radius;
 
-        (* ID du noeud (pour debug) *)
-        moveto (x - 5) (y - 5);
+        (* ID du noeud *)
+        let id_str = string_of_int node.id in
+        let w_id, h_id = text_size id_str in
+        moveto (x - (w_id / 2)) (y - (h_id / 2));
         set_color black;
-        draw_string (string_of_int node.id)
+        draw_string id_str
       with Not_found -> ())
     genome.nodes;
 
-  (* Attendre une touche pour fermer *)
-  Printf.printf
-    "Appuyez sur une touche dans la fenetre graphique pour continuer...\n";
-  flush stdout;
-  ignore (read_key ());
-  close_graph ()
+  (* --- 3. NOUVEAU : DESSINER LE FITNESS EN HAUT --- *)
+  set_color black;
+  (* On formate le fitness avec 4 décimales pour voir la précision *)
+  let fit_str = Printf.sprintf "Fitness: %.4f" genome.fitness in
+
+  (* On calcule la taille du texte pour bien le centrer *)
+  let w_fit, _ = text_size fit_str in
+
+  (* Position : Centré horizontalement (width/2), en haut (height - 20) *)
+  moveto ((width / 2) - (w_fit / 2)) (height - 30);
+
+  (* On peut grossir un peu le texte artificiellement ou juste l'afficher tel quel *)
+  draw_string fit_str;
+
+  synchronize ()

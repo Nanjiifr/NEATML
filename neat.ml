@@ -157,51 +157,67 @@ let mutate_weights g =
 let mutate_topology g mod_type innov_global =
   let nodes_array = Array.of_list g.nodes in
   match mod_type with
-  | Connexion ->
-      let ind_start = ref (Random.int (Array.length nodes_array)) in
-      while nodes_array.(!ind_start).kind = Output do
-        ind_start := Random.int (Array.length nodes_array)
-      done;
-      let ind_end = ref (Random.int (Array.length nodes_array)) in
-      while nodes_array.(!ind_end).kind = Sensor do
-        ind_end := Random.int (Array.length nodes_array)
-      done;
-      while
-        List.fold_left
-          (fun acc c ->
-            c.in_node = nodes_array.(!ind_start).id
-            && c.out_node = nodes_array.(!ind_end).id
-            || acc)
-          false g.connections
-      do
-        ind_start := Random.int (Array.length nodes_array);
-        while nodes_array.(!ind_start).kind <> Output do
-          ind_start := Random.int (Array.length nodes_array)
+  | Connexion -> begin
+      let max_attempts = 20 in
+      let attempts = ref 0 in
+      let found = ref false in
+
+      let best_start = ref 0 in
+      let best_end = ref 0 in
+
+      while (not !found) && !attempts < max_attempts do
+        incr attempts;
+
+        let s = ref (Random.int (Array.length nodes_array)) in
+        while nodes_array.(!s).kind = Output do
+          s := Random.int (Array.length nodes_array)
         done;
-        ind_end := Random.int (Array.length nodes_array);
-        while nodes_array.(!ind_end).kind <> Sensor do
-          ind_end := Random.int (Array.length nodes_array)
-        done
+
+        let e = ref (Random.int (Array.length nodes_array)) in
+        while nodes_array.(!e).kind = Sensor do
+          e := Random.int (Array.length nodes_array)
+        done;
+
+        let exists =
+          List.exists
+            (fun c ->
+              c.in_node = nodes_array.(!s).id
+              && c.out_node = nodes_array.(!e).id)
+            g.connections
+        in
+
+        let self_loop = nodes_array.(!s).id = nodes_array.(!e).id in
+
+        if (not exists) && not self_loop then begin
+          found := true;
+          best_start := !s;
+          best_end := !e
+        end
       done;
-      let weight = Random.float 20. -. 10. in
-      let innov_id =
-        InnovationManager.get_innov_id innov_global nodes_array.(!ind_start).id
-          nodes_array.(!ind_end).id Connexion
-      in
-      let new_connection =
+
+      if !found then begin
+        let weight = Random.float 20. -. 10. in
+        let innov_id =
+          InnovationManager.get_innov_id innov_global
+            nodes_array.(!best_start).id nodes_array.(!best_end).id Connexion
+        in
+        let new_connection =
+          {
+            in_node = nodes_array.(!best_start).id;
+            out_node = nodes_array.(!best_end).id;
+            weight;
+            enabled = true;
+            innov = innov_id;
+          }
+        in
         {
-          in_node = !ind_start;
-          out_node = !ind_end;
-          weight;
-          enabled = true;
-          innov = innov_id;
+          connections = g.connections @ [ new_connection ];
+          nodes = g.nodes;
+          fitness = g.fitness;
         }
-      in
-      {
-        connections = g.connections @ [ new_connection ];
-        nodes = g.nodes;
-        fitness = g.fitness;
-      }
+      end
+      else g
+    end
   | Node ->
       let enabled_conns = List.filter (fun c -> c.enabled) g.connections in
       if enabled_conns = [] then g
@@ -310,8 +326,8 @@ let create_phenotype g =
         in
         Hashtbl.replace neuron_map c.out_node new_neuron
       end)
-    g.connections ;
-  {neuron_map=neuron_map; inputs=(!inputs); outputs=(!outputs)}
+    g.connections;
+  { neuron_map; inputs = !inputs; outputs = !outputs }
 
 let predict nn ninputs =
   let epochs = 5 in

@@ -1,12 +1,10 @@
-(* test.ml *)
-(* Assure-toi d'avoir compilé main.ml avant ou d'ouvrir le module si c'est un projet dune *)
 open Neat
 
 let run_test () =
   Printf.printf "=== DÉBUT DU TEST NEAT (Version Utilisateur) ===\n";
 
   (* 1. SETUP *)
-  let innov_mgr = InnovationManager.create () in
+  let innov_mgr = InnovationManager.create 10 in
 
   (* On crée un génome simple valide : 1 Sensor -> 2 Output *)
   let initial_genome =
