@@ -27,3 +27,5 @@ _opam/
 *~
 *.swp
 \#*#
+
+.vscode/

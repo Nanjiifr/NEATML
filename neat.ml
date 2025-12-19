@@ -42,7 +42,7 @@ module InnovationManager = struct
     mutations : (node_id * node_id * mutation_type, innovation_id) Hashtbl.t;
   }
 
-  let create () = { curr = ref 100; mutations = Hashtbl.create 16 }
+  let create init_id = { curr = ref init_id; mutations = Hashtbl.create 16 }
   let reset_innovation innov = Hashtbl.reset innov.mutations
 
   let get_innov_id innov source_id target_id mut =
@@ -310,7 +310,8 @@ let create_phenotype g =
         in
         Hashtbl.replace neuron_map c.out_node new_neuron
       end)
-    g.connections
+    g.connections ;
+  {neuron_map=neuron_map; inputs=(!inputs); outputs=(!outputs)}
 
 let predict nn ninputs =
   let epochs = 5 in
@@ -319,7 +320,7 @@ let predict nn ninputs =
   List.iter2
     (fun i v -> (Hashtbl.find nn.neuron_map i).value <- v)
     nn.inputs ninputs;
-  for i = 0 to epochs - 1 do
+  for _ = 0 to epochs - 1 do
     let temp_values = ref [] in
     Hashtbl.iter
       (fun i (n : neuron) ->

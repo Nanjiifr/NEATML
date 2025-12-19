@@ -14,13 +14,13 @@ let color_bg = white
 
 (* --- CALCUL DES POSITIONS --- *)
 (* Retourne une Hashtbl : Node_ID -> (x, y) *)
-let calculate_positions nodes =
+let calculate_positions (nodes: node_gene list) =
   let positions = Hashtbl.create (List.length nodes) in
 
   (* Séparer les types de noeuds *)
-  let sensors = List.filter (fun n -> n.kind = Sensor) nodes in
-  let outputs = List.filter (fun n -> n.kind = Output) nodes in
-  let hidden = List.filter (fun n -> n.kind = Hidden) nodes in
+  let (sensors: node_gene list) = List.filter (fun (n: node_gene) -> n.kind = Sensor) nodes in
+  let outputs = List.filter (fun (n: node_gene) -> n.kind = Output) nodes in
+  let hidden = List.filter (fun (n: node_gene) -> n.kind = Hidden) nodes in
 
   (* Fonction pour distribuer verticalement une liste de noeuds à une position X donnée *)
   let distribute_vertical x_pos node_list =

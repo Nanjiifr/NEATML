@@ -1,4 +1,4 @@
 (executable
   (name test)
   (libraries graphics)
-  (modules neat visualizer test))
+  (modules neat visualizer evolution test))
