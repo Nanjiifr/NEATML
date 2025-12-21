@@ -36,6 +36,15 @@ type network = {
   outputs : int list;
 }
 
+type species = {
+  sp_id : int;
+  repr : genome;
+  members : genome list;
+  best_fitness : float;
+  stagn_count : int;
+  spawn_amount : int;
+}
+
 module InnovationManager = struct
   type t = {
     curr : innovation_id ref;
@@ -361,3 +370,50 @@ let predict nn ninputs =
     (List.fold_left
        (fun acc i -> (Hashtbl.find nn.neuron_map i).value :: acc)
        [] nn.outputs)
+
+let clear_species_members l_species =
+  List.map
+    (fun s ->
+      {
+        sp_id = s.sp_id;
+        members = [];
+        spawn_amount = s.spawn_amount;
+        repr = s.repr;
+        best_fitness = s.best_fitness;
+        stagn_count = s.stagn_count;
+      })
+    l_species
+
+let speciate_gemome l_species g =
+  let treshold = 3.0 in
+  let has_fit = ref false in
+  let new_species =
+    List.map
+      (fun s ->
+        let delta = compatibility_distance s.repr g in
+        if delta < treshold && not !has_fit then begin
+          has_fit := true;
+          {
+            sp_id = s.sp_id;
+            members = g :: s.members;
+            spawn_amount = s.spawn_amount;
+            repr = s.repr;
+            best_fitness = s.best_fitness;
+            stagn_count = s.stagn_count;
+          }
+        end
+        else s)
+      l_species
+  in
+  if not !has_fit then
+    let max_id = (List.hd l_species).sp_id in
+    {
+      sp_id = max_id + 1;
+      repr = g;
+      members = [ g ];
+      best_fitness = g.fitness;
+      stagn_count = 0;
+      spawn_amount = 0;
+    }
+    :: l_species
+  else new_species
