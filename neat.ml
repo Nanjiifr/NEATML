@@ -139,9 +139,11 @@ let mutate_weights g =
           let curr_weight = c.weight in
           let modify = Random.int 100 < 95 in
           if modify then
+            let power = 2.5 in
             let new_weight =
-              curr_weight +. ((Random.float 0.2 -. 0.1) *. curr_weight)
+              curr_weight +. (Random.float (2. *. power) -. power)
             in
+            let new_weight = max (-20.) (min 20. new_weight) in
             {
               in_node = c.in_node;
               out_node = c.out_node;
@@ -307,7 +309,7 @@ let compatibility_distance g1 g2 =
   in
   aux g1.connections g2.connections
 
-let sigmoid x = 1. /. (1. +. exp (-4.9 *. x))
+let sigmoid x = 1. /. (1. +. exp (-1. *. x))
 
 let create_phenotype g =
   let neuron_map = Hashtbl.create 16 in
@@ -339,7 +341,7 @@ let create_phenotype g =
   { neuron_map; inputs = !inputs; outputs = !outputs }
 
 let predict nn ninputs =
-  let epochs = 5 in
+  let epochs = 30 in
   if List.length ninputs <> List.length nn.inputs then
     failwith "Predict : wrong input size\n";
   List.iter2
@@ -358,6 +360,7 @@ let predict nn ninputs =
                 acc +. (curr_value *. weight))
               0. n.incoming
           in
+          (*let activated = if n.kind = Output then sum else sigmoid sum in*)
           let activated = sigmoid sum in
           temp_values := (i, activated) :: !temp_values
         end)
@@ -406,7 +409,9 @@ let speciate_gemome l_species g =
       l_species
   in
   if not !has_fit then
-    let max_id = (List.hd l_species).sp_id in
+    let max_id =
+      List.fold_left (fun max_id s -> max s.sp_id max_id) 0 l_species
+    in
     {
       sp_id = max_id + 1;
       repr = g;
@@ -417,3 +422,13 @@ let speciate_gemome l_species g =
     }
     :: l_species
   else new_species
+
+let get_fitness g dataset f =
+  let n = float (Array.length dataset) in
+  let phenotype = create_phenotype g in
+  1. /. n
+  *. Array.fold_left
+       (fun acc (i, o) ->
+         let fitness = f (predict phenotype i) o in
+         fitness +. acc)
+       0. dataset

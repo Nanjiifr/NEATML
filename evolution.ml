@@ -18,7 +18,7 @@ let create_pop pop_size number_inputs number_outputs innov_global =
             {
               in_node = id_in;
               out_node = id_out;
-              weight = Random.float 20. -. 10.;
+              weight = Random.float 4. -. 2.;
               enabled = true;
               innov =
                 InnovationManager.get_innov_id innov_global id_in id_out
@@ -53,36 +53,195 @@ let create_pop pop_size number_inputs number_outputs innov_global =
   done;
   { pop_size; genomes = !genomes }
 
-let generation pop f dataset innov_global =
-  (*f is the fitness function*)
-  let n = float (Array.length dataset) in
-  let to_cross = pop.pop_size / 3 in
-  let mutated_genomes = List.map (fun g -> mutate g innov_global) pop.genomes in
+let speciate_population genomes l_species =
+  let new_species = ref l_species in
+  List.iter (fun g -> new_species := speciate_gemome !new_species g) genomes;
+  !new_species
 
-  let crossed_gemomes = ref [] in
-  List.iteri
-    (fun i g1 ->
-      List.iteri
-        (fun j g2 ->
-          if j > i then crossed_gemomes := crossover g1 g2 :: !crossed_gemomes)
-        (List.take to_cross pop.genomes))
-    (List.take to_cross pop.genomes);
-  let new_genomes_fitness =
+let update_repr l_species =
+  List.map
+    (fun s ->
+      let new_repr = List.nth s.members (Random.int (List.length s.members)) in
+      {
+        sp_id = s.sp_id;
+        repr = new_repr;
+        members = s.members;
+        best_fitness = s.best_fitness;
+        stagn_count = s.stagn_count;
+        spawn_amount = s.spawn_amount;
+      })
+    l_species
+
+let get_best_fitness s =
+  List.fold_left max 0. (List.map (fun g -> g.fitness) s.members)
+
+let manage_satgn s =
+  let best_fitness = get_best_fitness s in
+  if best_fitness > s.best_fitness then
+    {
+      sp_id = s.sp_id;
+      repr = s.repr;
+      members = s.members;
+      best_fitness;
+      stagn_count = 0;
+      spawn_amount = s.spawn_amount;
+    }
+  else
+    {
+      sp_id = s.sp_id;
+      repr = s.repr;
+      members = s.members;
+      best_fitness = s.best_fitness;
+      stagn_count = s.stagn_count + 1;
+      spawn_amount = s.spawn_amount;
+    }
+
+let calculate_adj_fitness l_species =
+  List.map
+    (fun s ->
+      let n_members = List.length s.members in
+      let new_members =
+        List.map
+          (fun g ->
+            {
+              nodes = g.nodes;
+              connections = g.connections;
+              fitness = g.fitness /. float n_members;
+            })
+          s.members
+      in
+      {
+        sp_id = s.sp_id;
+        repr = s.repr;
+        members = new_members;
+        best_fitness = get_best_fitness s;
+        stagn_count = s.stagn_count;
+        spawn_amount = s.spawn_amount;
+      })
+    l_species
+
+let calculate_spawn_amounts l_species pop_size =
+  let total_adj_fitness =
+    List.fold_left
+      (fun acc s ->
+        List.fold_left (fun acc_g g -> acc_g +. g.fitness) acc s.members)
+      0. l_species
+  in
+
+  let temp_species =
+    List.map
+      (fun s ->
+        let species_adj_fitness =
+          List.fold_left (fun acc g -> acc +. g.fitness) 0. s.members
+        in
+        let share =
+          if total_adj_fitness > 0. then
+            species_adj_fitness /. total_adj_fitness
+          else 0.
+        in
+        let raw_spawn = int_of_float (share *. float pop_size) in
+        { s with spawn_amount = raw_spawn })
+      l_species
+  in
+
+  let total_allocated =
+    List.fold_left (fun acc s -> acc + s.spawn_amount) 0 temp_species
+  in
+  let remainder = pop_size - total_allocated in
+
+  if remainder > 0 then
+    let sorted_sp =
+      List.sort
+        (fun s1 s2 -> compare s2.best_fitness s1.best_fitness)
+        temp_species
+    in
+    match sorted_sp with
+    | [] -> [] (* Ne devrait pas arriver si pop_size > 0 *)
+    | best :: rest ->
+        { best with spawn_amount = best.spawn_amount + remainder } :: rest
+  else temp_species
+
+let reproduce_species s innov =
+  let n_members = List.length s.members in
+  let to_spawn = ref s.spawn_amount in
+
+  let sorted_members =
+    List.sort (fun g1 g2 -> compare g2.fitness g1.fitness) s.members
+  in
+
+  let childs = ref [] in
+
+  if n_members >= 3 && !to_spawn > 0 then begin
+    childs := List.hd sorted_members :: !childs;
+    decr to_spawn
+  end;
+
+  let to_take = max 1 (n_members / 2) in
+
+  let parents_list = List.take to_take sorted_members in
+  let parents = Array.of_list parents_list in
+
+  let n_parents = Array.length parents in
+  if n_parents = 0 then failwith "No parents available in species!";
+
+  while !to_spawn > 0 do
+    let seed = Random.int 100 in
+    let p1 = parents.(Random.int n_parents) in
+
+    let child =
+      if seed < 75 && n_parents > 1 then
+        let p2 = parents.(Random.int n_parents) in
+        crossover p1 p2
+      else p1
+    in
+
+    let mutated = mutate child innov in
+    childs := mutated :: !childs;
+    decr to_spawn
+  done;
+  !childs
+
+let delete_empty_sp l_species =
+  List.rev
+    (List.fold_left
+       (fun acc s -> if s.members <> [] then s :: acc else acc)
+       [] l_species)
+
+let delete_stagn l_species =
+  List.rev
+    (List.fold_left
+       (fun acc s -> if s.stagn_count <= 15 then s :: acc else acc)
+       [] l_species)
+
+let generation pop l_species dataset f innov_global =
+  let new_fitness_genomes =
     List.map
       (fun g ->
-        let phenotype = create_phenotype g in
-        let new_fitness =
-          1. /. n
-          *. Array.fold_left
-               (fun acc (inputs, outputs) ->
-                 f (predict phenotype inputs) outputs +. acc)
-               0. dataset
-        in
-        { nodes = g.nodes; connections = g.connections; fitness = new_fitness })
-      (pop.genomes @ !crossed_gemomes @ mutated_genomes)
+        let new_fitness = get_fitness g dataset f in
+        { g with fitness = new_fitness })
+      pop.genomes
   in
 
-  let new_genomes =
-    List.sort (fun g1 g2 -> compare g2.fitness g1.fitness) new_genomes_fitness
+  let empty_species = clear_species_members l_species in
+  let species_filled =
+    delete_empty_sp (speciate_population new_fitness_genomes empty_species)
   in
-  { pop_size = pop.pop_size; genomes = List.take pop.pop_size new_genomes }
+
+  let species_active = delete_stagn species_filled in
+  let species_adjusted = calculate_adj_fitness species_active in
+
+  let species_calculated =
+    calculate_spawn_amounts species_adjusted pop.pop_size
+  in
+
+  let new_genomes = ref [] in
+  List.iter
+    (fun s ->
+      let babies = reproduce_species s innov_global in
+      new_genomes := babies @ !new_genomes)
+    species_calculated;
+
+  let species_updated = update_repr species_active in
+
+  let new_pop = { pop_size = pop.pop_size; genomes = !new_genomes } in
+  (new_pop, species_updated)

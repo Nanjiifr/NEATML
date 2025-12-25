@@ -1,4 +1,4 @@
 (executable
-  (name test_affine)
+  (name test_xor)
   (libraries graphics unix)
-  (modules neat visualizer evolution test_affine))
+  (modules neat visualizer evolution test_xor))

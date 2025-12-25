@@ -3,15 +3,10 @@ open Evolution
 open Visualizer
 open Graphics
 
-(* On veut maximiser le fitness. 
-   L'erreur max possible est 1.0 (car sigmoid sort entre 0 et 1).
-   Donc Fitness = 1.0 - erreur.
-*)
 let f predicted_list real_list =
   let predicted = List.hd predicted_list and real = List.hd real_list in
   let error = abs_float (real -. predicted) in
-  (* On met au carré l'erreur pour pénaliser fortement les gros écarts *)
-  1.0 -. (error *. error)
+  1.0 /. (1.0 +. (error *. error))
 
 let main () =
   Random.self_init ();
@@ -19,20 +14,16 @@ let main () =
   open_graph (" " ^ string_of_int 800 ^ "x" ^ string_of_int 600);
   set_window_title "NEAT Affine Test";
 
-  let pop_size = 50 in
-  (* Une population un peu plus grande aide *)
-  (* 1 seule entrée réelle + le biais *)
+  let pop_size = 250 in
   let number_inputs = 1 and number_outputs = 1 in
-  let epochs = 100 in
-  (* Plus d'époques pour laisser le temps de converger *)
+  let epochs = 1000 in
 
   let innov_global =
     InnovationManager.create (number_outputs + number_inputs + 2)
   in
 
-  (* Attention : create_pop prend le nombre d'inputs HORS biais. 
-     Donc ici 1 input (le biais est ajouté auto dans create_pop) *)
   let pop = ref (create_pop pop_size 1 1 innov_global) in
+  let l_species = ref [] in
 
   Printf.printf "Population créée avec 1 input + 1 biais\n";
   flush stdout;
@@ -44,9 +35,7 @@ let main () =
   let dataset =
     [|
       ([ 1.; 0.0 ], [ 0.20 ]);
-      (* 0.5*0 + 0.2 = 0.2 *)
       ([ 1.; 0.2 ], [ 0.30 ]);
-      (* 0.5*0.2 + 0.2 = 0.3 *)
       ([ 1.; 0.4 ], [ 0.40 ]);
       ([ 1.; 0.6 ], [ 0.50 ]);
       ([ 1.; 0.8 ], [ 0.60 ]);
@@ -58,9 +47,15 @@ let main () =
     Printf.printf "Epoch: %d\n" epoch;
     flush stdout;
 
-    pop := generation !pop f dataset innov_global;
+    let new_pop, new_sp = generation !pop !l_species dataset f innov_global in
+    pop := new_pop;
+    l_species := new_sp;
 
-    let best_genome = List.hd !pop.genomes in
+    let best_genome =
+      List.fold_left
+        (fun max_g g -> if g.fitness > max_g.fitness then g else max_g)
+        (List.hd !pop.genomes) !pop.genomes
+    in
 
     (* Affichage *)
     draw_genome best_genome;
