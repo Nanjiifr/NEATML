@@ -20,6 +20,7 @@ type genome = {
   nodes : node_gene list;
   connections : connection_gene list;
   fitness : float;
+  adj_fitness : float;
 }
 
 type incoming_link = { source_id : int; weight : float }
@@ -128,7 +129,12 @@ let crossover g1 g2 =
   in
   let new_connexion_gene = aux g1.connections g2.connections in
   let new_nodes = reconstruct_nodes new_connexion_gene g1 g2 in
-  { connections = new_connexion_gene; nodes = new_nodes; fitness = 0. }
+  {
+    connections = new_connexion_gene;
+    nodes = new_nodes;
+    fitness = 0.;
+    adj_fitness = 0.;
+  }
 
 let mutate_weights g =
   let conn =
@@ -139,7 +145,7 @@ let mutate_weights g =
           let curr_weight = c.weight in
           let modify = Random.int 100 < 95 in
           if modify then
-            let power = 2.5 in
+            let power = 0.5 in
             let new_weight =
               curr_weight +. (Random.float (2. *. power) -. power)
             in
@@ -163,7 +169,12 @@ let mutate_weights g =
         else c)
       g.connections
   in
-  { connections = conn; nodes = g.nodes; fitness = g.fitness }
+  {
+    connections = conn;
+    nodes = g.nodes;
+    fitness = g.fitness;
+    adj_fitness = g.adj_fitness;
+  }
 
 let mutate_topology g mod_type innov_global =
   let nodes_array = Array.of_list g.nodes in
@@ -225,6 +236,7 @@ let mutate_topology g mod_type innov_global =
           connections = g.connections @ [ new_connection ];
           nodes = g.nodes;
           fitness = g.fitness;
+          adj_fitness = g.adj_fitness;
         }
       end
       else g
@@ -280,6 +292,7 @@ let mutate_topology g mod_type innov_global =
           connections = new_connections_list @ [ new_conn_in; new_conn_out ];
           nodes = g.nodes @ [ new_node ];
           fitness = g.fitness;
+          adj_fitness = g.adj_fitness;
         }
 
 let mutate g innov_global =

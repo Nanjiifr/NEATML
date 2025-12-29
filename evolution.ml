@@ -49,7 +49,13 @@ let create_pop pop_size number_inputs number_outputs innov_global =
     nodes := bias_node :: !nodes;
     connections := List.rev !connections;
     genomes :=
-      { nodes = !nodes; connections = !connections; fitness = 0. } :: !genomes
+      {
+        nodes = !nodes;
+        connections = !connections;
+        fitness = 0.;
+        adj_fitness = 0.;
+      }
+      :: !genomes
   done;
   { pop_size; genomes = !genomes }
 
@@ -102,29 +108,17 @@ let calculate_adj_fitness l_species =
       let n_members = List.length s.members in
       let new_members =
         List.map
-          (fun g ->
-            {
-              nodes = g.nodes;
-              connections = g.connections;
-              fitness = g.fitness /. float n_members;
-            })
+          (fun g -> { g with adj_fitness = g.fitness /. float n_members })
           s.members
       in
-      {
-        sp_id = s.sp_id;
-        repr = s.repr;
-        members = new_members;
-        best_fitness = get_best_fitness s;
-        stagn_count = s.stagn_count;
-        spawn_amount = s.spawn_amount;
-      })
+      { s with members = new_members })
     l_species
 
 let calculate_spawn_amounts l_species pop_size =
   let total_adj_fitness =
     List.fold_left
       (fun acc s ->
-        List.fold_left (fun acc_g g -> acc_g +. g.fitness) acc s.members)
+        List.fold_left (fun acc_g g -> acc_g +. g.adj_fitness) acc s.members)
       0. l_species
   in
 
@@ -132,7 +126,7 @@ let calculate_spawn_amounts l_species pop_size =
     List.map
       (fun s ->
         let species_adj_fitness =
-          List.fold_left (fun acc g -> acc +. g.fitness) 0. s.members
+          List.fold_left (fun acc g -> acc +. g.adj_fitness) 0. s.members
         in
         let share =
           if total_adj_fitness > 0. then
@@ -171,7 +165,7 @@ let reproduce_species s innov =
 
   let childs = ref [] in
 
-  if n_members >= 3 && !to_spawn > 0 then begin
+  if n_members >= 5 && !to_spawn > 0 then begin
     childs := List.hd sorted_members :: !childs;
     decr to_spawn
   end;
@@ -213,13 +207,13 @@ let delete_stagn l_species =
        (fun acc s -> if s.stagn_count <= 15 then s :: acc else acc)
        [] l_species)
 
-let generation pop l_species dataset f innov_global =
+let generation pop l_species evaluator innov_global =
   let new_fitness_genomes =
-    List.map
+    Parmap.parmap ~ncores:8
       (fun g ->
-        let new_fitness = get_fitness g dataset f in
+        let new_fitness = evaluator g in
         { g with fitness = new_fitness })
-      pop.genomes
+      (Parmap.L pop.genomes)
   in
 
   let empty_species = clear_species_members l_species in
@@ -227,7 +221,9 @@ let generation pop l_species dataset f innov_global =
     delete_empty_sp (speciate_population new_fitness_genomes empty_species)
   in
 
-  let species_active = delete_stagn species_filled in
+  let species_updated_stats = List.map manage_satgn species_filled in
+
+  let species_active = delete_stagn species_updated_stats in
   let species_adjusted = calculate_adj_fitness species_active in
 
   let species_calculated =
@@ -245,3 +241,57 @@ let generation pop l_species dataset f innov_global =
 
   let new_pop = { pop_size = pop.pop_size; genomes = !new_genomes } in
   (new_pop, species_updated)
+
+let rec get_digits n = match n / 10 with 0 -> 1 | n' -> 1 + get_digits n'
+
+let print_pop_summary pop l_species epoch =
+  Printf.printf "==================================================%s\n"
+    (String.make (get_digits epoch) '=');
+  Printf.printf "===================== Epoch %d =====================\n" epoch;
+  Printf.printf "=============== POPULATION SUMMARY ===============%s\n"
+    (String.make (get_digits epoch) '=');
+  Printf.printf "==================================================%s\n"
+    (String.make (get_digits epoch) '=');
+  let sorted_species =
+    List.take 5
+      (List.sort
+         (fun s1 s2 -> compare s2.best_fitness s1.best_fitness)
+         l_species)
+  in
+
+  Printf.printf "Species [%d active(s)]:\n" (List.length l_species);
+  Printf.printf "  %-4s | %-8s | %-12s | %-8s\n" "ID" "Members" "Best Fit"
+    "Stagn";
+  Printf.printf "  -----+----------+--------------+--------\n";
+
+  List.iter
+    (fun s ->
+      Printf.printf "  %-4d | %-8d | %-12.4f | %-8d\n" s.sp_id
+        (List.length s.members) s.best_fitness s.stagn_count)
+    sorted_species;
+
+  let best_genome_opt =
+    match pop.genomes with
+    | [] -> None
+    | h :: t ->
+        Some
+          (List.fold_left
+             (fun acc g -> if g.fitness > acc.fitness then g else acc)
+             h t)
+  in
+
+  match best_genome_opt with
+  | Some g ->
+      let enabled_conns = List.filter (fun c -> c.enabled) g.connections in
+      Printf.printf "\nGlobal Best Genome Stats:\n";
+      Printf.printf "  Fitness     : %.4f\n" g.fitness;
+      Printf.printf "  Nodes       : %d\n" (List.length g.nodes);
+      Printf.printf "  Connections : %d (Enabled: %d)\n\n"
+        (List.length g.connections)
+        (List.length enabled_conns)
+  | None ->
+      Printf.printf "\nGlobal Best Genome: N/A (Population vide)\n";
+
+      Printf.printf "==================================================%s\n\n"
+        (String.make (get_digits epoch) '=');
+      flush stdout

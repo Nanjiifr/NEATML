@@ -1,4 +1,4 @@
 (executable
-  (name test_xor)
-  (libraries graphics unix)
-  (modules neat visualizer evolution test_xor))
+  (name test_cartpole)
+  (libraries graphics unix parmap)
+  (modules neat visualizer evolution cartpole cartpole_vis test_cartpole))
