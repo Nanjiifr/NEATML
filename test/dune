@@ -1,0 +1,9 @@
+(executables
+ (names test_snake)
+ (modules test_snake snake)
+ (libraries neatml))
+
+(alias
+ (name all)
+ (deps test_snake.exe))
+

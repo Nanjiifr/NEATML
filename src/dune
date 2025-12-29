@@ -1,0 +1,17 @@
+(library
+ (name neatml)
+ (wrapped false)
+ (modules
+	types
+	innovation
+	genome
+	mutation
+	phenotype
+	speciation
+	neat
+	evolution
+	visualizer
+	cartpole
+	cartpole_vis)
+ (libraries unix parmap graphics))
+
