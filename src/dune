@@ -1,6 +1,5 @@
 (library
  (name neatml)
- (wrapped false)
  (modules
 	types
 	innovation
@@ -9,7 +8,6 @@
 	phenotype
 	speciation
 	evolution
-	visualizer
-	neat)
+	visualizer)
  (libraries unix parmap graphics))
 

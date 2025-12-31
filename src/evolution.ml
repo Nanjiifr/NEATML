@@ -1,4 +1,8 @@
-open Neat
+open Genome
+open Innovation
+open Mutation
+open Speciation
+open Types
 
 type population = { pop_size : int; genomes : genome list }
 
@@ -240,7 +244,7 @@ let generation pop l_species evaluator innov_global =
   let species_updated = update_repr species_active in
 
   let new_pop = { pop_size = pop.pop_size; genomes = !new_genomes } in
-  (new_pop, species_updated)
+  (new_pop, species_updated, new_fitness_genomes)
 
 let rec get_digits n = match n / 10 with 0 -> 1 | n' -> 1 + get_digits n'
 

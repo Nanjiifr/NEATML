@@ -1,5 +1,5 @@
 open Graphics
-open Neat
+open Types
 
 (* --- Configuration de la Fenêtre --- *)
 let win_width = 1000 (* Largeur de la fenêtre *)
@@ -17,7 +17,6 @@ let init_window () =
   open_graph (Printf.sprintf " %dx%d" win_width win_height);
   set_window_title "NEAT Cartpole & Genome Visualization";
   auto_synchronize false
-
 
 let calculate_positions (nodes : node_gene list) =
   let positions = Hashtbl.create (List.length nodes) in
