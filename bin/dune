@@ -1,9 +1,0 @@
-(executable
- (name test_cartpole)
- (modules test_cartpole)
- (libraries neatml))
-
-(alias
- (name all)
- (deps test_cartpole.exe))
-

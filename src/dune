@@ -8,10 +8,8 @@
 	mutation
 	phenotype
 	speciation
-	neat
 	evolution
 	visualizer
-	cartpole
-	cartpole_vis)
+	neat)
  (libraries unix parmap graphics))
 
