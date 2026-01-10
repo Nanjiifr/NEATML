@@ -1,13 +1,10 @@
 open Graphics
 open Types
 
-(* --- Configuration de la Fenêtre --- *)
 let win_width = 1000 (* Largeur de la fenêtre *)
 let net_height = 500 (* Hauteur réservée au réseau (en bas) *)
 let game_height = 400 (* Hauteur réservée au jeu (en haut) *)
 let win_height = net_height + game_height
-
-(* --- Couleurs et Styles --- *)
 let color_sensor = rgb 100 200 100
 let color_output = rgb 200 100 100
 let color_hidden = rgb 150 150 255
@@ -15,8 +12,37 @@ let node_radius = 12
 
 let init_window () =
   open_graph (Printf.sprintf " %dx%d" win_width win_height);
-  set_window_title "NEAT Cartpole & Genome Visualization";
+  set_window_title "NEAT Genome Visualization";
   auto_synchronize false
+
+let draw_arrow x1 y1 x2 y2 radius =
+  let dx = float (x2 - x1) in
+  let dy = float (y2 - y1) in
+  let dist = sqrt ((dx *. dx) +. (dy *. dy)) in
+  if dist > float radius then begin
+    (* Point d'arrêt de la ligne (bord du cercle) *)
+    let stop_x = float x2 -. (dx /. dist *. float radius) in
+    let stop_y = float y2 -. (dy /. dist *. float radius) in
+
+    (* Dessin de la ligne principale *)
+    moveto x1 y1;
+    lineto (int_of_float stop_x) (int_of_float stop_y);
+
+    (* Calcul des pointes de la flèche *)
+    let arrow_len = 15. in
+    let angle = atan2 dy dx in
+    let a1 = angle +. 3.14159 -. 0.5 in
+    let a2 = angle +. 3.14159 +. 0.5 in
+
+    moveto (int_of_float stop_x) (int_of_float stop_y);
+    lineto
+      (int_of_float (stop_x +. (cos a1 *. arrow_len)))
+      (int_of_float (stop_y +. (sin a1 *. arrow_len)));
+    moveto (int_of_float stop_x) (int_of_float stop_y);
+    lineto
+      (int_of_float (stop_x +. (cos a2 *. arrow_len)))
+      (int_of_float (stop_y +. (sin a2 *. arrow_len)))
+  end
 
 let calculate_positions (nodes : node_gene list) =
   let positions = Hashtbl.create (List.length nodes) in
@@ -24,7 +50,6 @@ let calculate_positions (nodes : node_gene list) =
   let outputs = List.filter (fun (n : node_gene) -> n.kind = Output) nodes in
   let hidden = List.filter (fun (n : node_gene) -> n.kind = Hidden) nodes in
 
-  (* Fonction pour aligner verticalement les inputs et outputs *)
   let distribute_vertical x_pos node_list =
     let n = List.length node_list in
     let margin = 50 in
@@ -61,6 +86,8 @@ let calculate_positions (nodes : node_gene list) =
   positions
 
 let draw_genome genome =
+  clear_graph ();
+
   let positions = calculate_positions genome.nodes in
 
   (* 1. Dessiner les connexions *)
@@ -76,11 +103,22 @@ let draw_genome genome =
 
           (* Epaisseur selon la force du poids *)
           let thickness =
-            int_of_float (min 6.0 (max 1.0 (abs_float conn.weight)))
+            int_of_float (min 5.0 (max 1.0 (abs_float conn.weight)))
           in
           set_line_width thickness;
-          moveto x1 y1;
-          lineto x2 y2)
+
+          draw_arrow x1 y1 x2 y2 node_radius;
+
+          let mid_x = (x1 + x2) / 2 in
+          let mid_y = (y1 + y2) / 2 in
+          let weight_str = Printf.sprintf "%.2f" conn.weight in
+          let tw, th = text_size weight_str in
+
+          set_color white;
+          fill_rect (mid_x - (tw / 2)) (mid_y - (th / 2)) tw th;
+          set_color black;
+          moveto (mid_x - (tw / 2)) (mid_y - (th / 2));
+          draw_string weight_str)
         else (
           (* Connexions désactivées en gris clair fin *)
           set_color (rgb 230 230 230);

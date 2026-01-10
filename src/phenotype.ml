@@ -1,6 +1,12 @@
 open Types
 
-let sigmoid x = 1. /. (1. +. exp (-1. *. x))
+(* let sigmoid x = 1. /. (1. +. exp (-1. *. x)) *)
+let sigmoid x = x
+
+let reset_network nn =
+  Hashtbl.iter
+    (fun key n -> Hashtbl.replace nn.neuron_map key { n with value = 0. })
+    nn.neuron_map
 
 let create_phenotype g =
   let neuron_map = Hashtbl.create 16 in
@@ -32,7 +38,8 @@ let create_phenotype g =
   { neuron_map; inputs = !inputs; outputs = !outputs }
 
 let predict nn ninputs =
-  let epochs = 30 in
+  let ninputs = 1. :: ninputs in
+  let epochs = 50 in
   if List.length ninputs <> List.length nn.inputs then
     failwith "Predict : wrong input size\n";
   List.iter2

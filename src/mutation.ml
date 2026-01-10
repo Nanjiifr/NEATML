@@ -1,5 +1,4 @@
 open Types
-open Innovation
 
 let mutate_weights g =
   let conn =
@@ -14,7 +13,7 @@ let mutate_weights g =
             let new_weight =
               curr_weight +. (Random.float (2. *. power) -. power)
             in
-            let new_weight = max (-20.) (min 20. new_weight) in
+            let new_weight = max (-5.) (min 5. new_weight) in
             {
               in_node = c.in_node;
               out_node = c.out_node;
@@ -23,7 +22,7 @@ let mutate_weights g =
               innov = c.innov;
             }
           else
-            let new_weight = Random.float 20. -. 10. in
+            let new_weight = Random.float 4. -. 2. in
             {
               in_node = c.in_node;
               out_node = c.out_node;
@@ -73,9 +72,7 @@ let mutate_topology g mod_type innov_global =
             g.connections
         in
 
-        let self_loop = nodes_array.(!s).id = nodes_array.(!e).id in
-
-        if (not exists) && not self_loop then begin
+        if not exists then begin
           found := true;
           best_start := !s;
           best_end := !e
@@ -83,10 +80,10 @@ let mutate_topology g mod_type innov_global =
       done;
 
       if !found then begin
-        let weight = Random.float 20. -. 10. in
+        let weight = Random.float 4. -. 2. in
         let innov_id =
-          InnovationManager.get_innov_id innov_global
-            nodes_array.(!best_start).id nodes_array.(!best_end).id Connexion
+          Innovation.get_innov_id innov_global nodes_array.(!best_start).id
+            nodes_array.(!best_end).id Connexion
         in
         let new_connection =
           {
@@ -121,16 +118,16 @@ let mutate_topology g mod_type innov_global =
         in
 
         let new_id =
-          InnovationManager.get_innov_id innov_global target_conn.in_node
+          Innovation.get_innov_id innov_global target_conn.in_node
             target_conn.out_node Node
         in
         let innov_id_in =
-          InnovationManager.get_innov_id innov_global target_conn.in_node new_id
+          Innovation.get_innov_id innov_global target_conn.in_node new_id
             Connexion
         in
         let innov_id_out =
-          InnovationManager.get_innov_id innov_global new_id
-            target_conn.out_node Connexion
+          Innovation.get_innov_id innov_global new_id target_conn.out_node
+            Connexion
         in
 
         let new_conn_in =
@@ -163,8 +160,8 @@ let mutate_topology g mod_type innov_global =
 let mutate g innov_global =
   let new_genome = mutate_weights g in
   let modified_gemome =
-    if Random.int 100 < 5 then mutate_topology new_genome Connexion innov_global
-    else if Random.int 100 < 3 then mutate_topology new_genome Node innov_global
+    if Random.int 100 < 3 then mutate_topology new_genome Connexion innov_global
+    else if Random.int 100 < 1 then mutate_topology new_genome Node innov_global
     else new_genome
   in
   modified_gemome

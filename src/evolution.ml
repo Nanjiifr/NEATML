@@ -1,5 +1,4 @@
 open Genome
-open Innovation
 open Mutation
 open Speciation
 open Types
@@ -22,11 +21,10 @@ let create_pop pop_size number_inputs number_outputs innov_global =
             {
               in_node = id_in;
               out_node = id_out;
-              weight = Random.float 4. -. 2.;
+              weight = 0.;
               enabled = true;
               innov =
-                InnovationManager.get_innov_id innov_global id_in id_out
-                  Connexion;
+                Innovation.get_innov_id innov_global id_in id_out Connexion;
             }
             :: !connections)
         output_ids;
@@ -44,8 +42,7 @@ let create_pop pop_size number_inputs number_outputs innov_global =
             out_node = id_out;
             weight = 1.;
             enabled = true;
-            innov =
-              InnovationManager.get_innov_id innov_global 0 id_out Connexion;
+            innov = Innovation.get_innov_id innov_global 0 id_out Connexion;
           }
           :: !connections)
       output_ids;
@@ -63,9 +60,11 @@ let create_pop pop_size number_inputs number_outputs innov_global =
   done;
   { pop_size; genomes = !genomes }
 
-let speciate_population genomes l_species =
+let speciate_population genomes l_species threshold =
   let new_species = ref l_species in
-  List.iter (fun g -> new_species := speciate_gemome !new_species g) genomes;
+  List.iter
+    (fun g -> new_species := speciate_gemome !new_species g threshold)
+    genomes;
   !new_species
 
 let update_repr l_species =
@@ -169,7 +168,7 @@ let reproduce_species s innov =
 
   let childs = ref [] in
 
-  if n_members >= 5 && !to_spawn > 0 then begin
+  if n_members >= 3 && !to_spawn > 0 then begin
     childs := List.hd sorted_members :: !childs;
     decr to_spawn
   end;
@@ -211,7 +210,7 @@ let delete_stagn l_species =
        (fun acc s -> if s.stagn_count <= 15 then s :: acc else acc)
        [] l_species)
 
-let generation pop l_species evaluator innov_global =
+let generation pop l_species evaluator innov_global dynamic_treshold =
   let new_fitness_genomes =
     Parmap.parmap ~ncores:8
       (fun g ->
@@ -220,9 +219,18 @@ let generation pop l_species evaluator innov_global =
       (Parmap.L pop.genomes)
   in
 
+  let target_species = 20 in
+  let nb_species = List.length l_species in
+
+  if nb_species < target_species then
+    dynamic_treshold := max 0.5 (!dynamic_treshold -. 0.3)
+  else if nb_species > target_species then
+    dynamic_treshold := !dynamic_treshold +. 0.3;
+
   let empty_species = clear_species_members l_species in
   let species_filled =
-    delete_empty_sp (speciate_population new_fitness_genomes empty_species)
+    delete_empty_sp
+      (speciate_population new_fitness_genomes empty_species !dynamic_treshold)
   in
 
   let species_updated_stats = List.map manage_satgn species_filled in

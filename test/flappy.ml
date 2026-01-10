@@ -230,7 +230,7 @@ let evaluator g =
 
   let state = ref (init_game conf) in
   while !state.time < max_ticks && !state.player.alive do
-    let inputs = 1. :: get_inputs !state in
+    let inputs = get_inputs !state in
     let pred = List.hd (Phenotype.predict phenotype inputs) in
     let action = if pred > 0.5 then true else false in
     state := next_frame !state action
@@ -246,7 +246,7 @@ let play_visual_game genome config generation =
   while !continue do
     View.render !state generation;
 
-    let inputs = 1. :: get_inputs !state in
+    let inputs = get_inputs !state in
     let pred = List.hd (Phenotype.predict phenotype inputs) in
     let action = pred > 0.5 in
 
@@ -260,14 +260,13 @@ let play_visual_game genome config generation =
 let main () =
   let number_inputs = 3 in
   let number_outputs = 1 in
-  let pop_size = 150 in
+  let pop_size = 300 in
   let epochs = 100 in
 
   View.open_window 400. 600.;
 
-  let innov =
-    Innovation.InnovationManager.create (number_inputs + number_outputs + 5)
-  in
+  let dynamic_threshold = ref 3. in
+  let innov = Innovation.create (number_inputs + number_outputs + 5) in
   let pop =
     ref (Evolution.create_pop pop_size number_inputs number_outputs innov)
   in
@@ -275,7 +274,7 @@ let main () =
 
   for epoch = 0 to epochs - 1 do
     let new_pop, new_sp, genomes_evaluated =
-      Evolution.generation !pop !l_species evaluator innov
+      Evolution.generation !pop !l_species evaluator innov dynamic_threshold
     in
     pop := new_pop;
     l_species := new_sp;

@@ -3,9 +3,12 @@ open Phenotype
 
 let compatibility_distance g1 g2 =
   let c1 = 1. and c2 = 1. and c3 = 0.4 in
-  let n =
-    float (max (List.length g1.connections) (List.length g2.connections))
-  in
+  let size1 = List.length g1.connections
+  and size2 = List.length g2.connections in
+  let max_size = max size1 size2 in
+
+  let n = if max_size < 20 then 1. else float max_size in
+
   let rec aux gene1 gene2 =
     match (gene1, gene2) with
     | [], [] -> 0.
@@ -32,14 +35,13 @@ let clear_species_members l_species =
       })
     l_species
 
-let speciate_gemome l_species g =
-  let treshold = 3.0 in
+let speciate_gemome l_species g threshold =
   let has_fit = ref false in
   let new_species =
     List.map
       (fun s ->
         let delta = compatibility_distance s.repr g in
-        if delta < treshold && not !has_fit then begin
+        if delta < threshold && not !has_fit then begin
           has_fit := true;
           {
             sp_id = s.sp_id;

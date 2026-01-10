@@ -1,4 +1,4 @@
-(executable
- (name flappy)
- (libraries graphics neatml)
+(executables
+ (names flappy language)
+ (libraries graphics unix neatml)
 )
