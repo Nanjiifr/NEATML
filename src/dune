@@ -8,6 +8,7 @@
 	phenotype
 	speciation
 	evolution
+  parser
 	visualizer)
  (libraries unix parmap graphics))
 

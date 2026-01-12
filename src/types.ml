@@ -23,6 +23,7 @@ type genome = {
   adj_fitness : float;
 }
 
+type population = { pop_size : int; genomes : genome list }
 type incoming_link = { source_id : int; weight : float }
 
 type neuron = {

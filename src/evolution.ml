@@ -3,8 +3,6 @@ open Mutation
 open Speciation
 open Types
 
-type population = { pop_size : int; genomes : genome list }
-
 let create_pop pop_size number_inputs number_outputs innov_global =
   let genomes = ref [] in
   for _ = 0 to pop_size - 1 do
@@ -158,7 +156,7 @@ let calculate_spawn_amounts l_species pop_size =
         { best with spawn_amount = best.spawn_amount + remainder } :: rest
   else temp_species
 
-let reproduce_species s innov =
+let reproduce_species s best_genome innov =
   let n_members = List.length s.members in
   let to_spawn = ref s.spawn_amount in
 
@@ -166,9 +164,14 @@ let reproduce_species s innov =
     List.sort (fun g1 g2 -> compare g2.fitness g1.fitness) s.members
   in
 
-  let childs = ref [] in
+  let best_sp_genome = List.hd sorted_members in
 
-  if n_members >= 3 && !to_spawn > 0 then begin
+  let childs = ref [] in
+  if best_sp_genome = best_genome then begin
+    childs := [ best_genome ];
+    decr to_spawn
+  end
+  else if n_members >= 5 && !to_spawn > 0 then begin
     childs := List.hd sorted_members :: !childs;
     decr to_spawn
   end;
@@ -222,10 +225,8 @@ let generation pop l_species evaluator innov_global dynamic_treshold =
   let target_species = 20 in
   let nb_species = List.length l_species in
 
-  if nb_species < target_species then
-    dynamic_treshold := max 0.5 (!dynamic_treshold -. 0.3)
-  else if nb_species > target_species then
-    dynamic_treshold := !dynamic_treshold +. 0.3;
+  let delta_species = float (target_species - nb_species) in
+  dynamic_treshold := max 0.5 (!dynamic_treshold -. (delta_species *. 0.05));
 
   let empty_species = clear_species_members l_species in
   let species_filled =
@@ -243,9 +244,15 @@ let generation pop l_species evaluator innov_global dynamic_treshold =
   in
 
   let new_genomes = ref [] in
+  let best_genome =
+    List.fold_left
+      (fun acc g -> if g.fitness > acc.fitness then g else acc)
+      (List.hd new_fitness_genomes)
+      new_fitness_genomes
+  in
   List.iter
     (fun s ->
-      let babies = reproduce_species s innov_global in
+      let babies = reproduce_species s best_genome innov_global in
       new_genomes := babies @ !new_genomes)
     species_calculated;
 
@@ -292,7 +299,7 @@ let print_pop_summary pop l_species epoch =
              h t)
   in
 
-  match best_genome_opt with
+  (match best_genome_opt with
   | Some g ->
       let enabled_conns = List.filter (fun c -> c.enabled) g.connections in
       Printf.printf "\nGlobal Best Genome Stats:\n";
@@ -305,5 +312,5 @@ let print_pop_summary pop l_species epoch =
       Printf.printf "\nGlobal Best Genome: N/A (Population vide)\n";
 
       Printf.printf "==================================================%s\n\n"
-        (String.make (get_digits epoch) '=');
-      flush stdout
+        (String.make (get_digits epoch) '='));
+  flush stdout

@@ -1,4 +1,5 @@
 open Neatml
+open Types
 
 type config = {
   gravity : float;
@@ -81,14 +82,16 @@ module View = struct
     moveto 10 10;
     draw_string (Printf.sprintf "Gen: %d | Score: %d" generation score)
 
-  let render state generation =
+  (* let render state generation =
     clear ();
     draw_pipes state.pipes state.config.pipe_width state.config.window_height
       state.config.pipe_gap;
     draw_bird state.player state.config.bird_radius;
     draw_score state.score generation;
-    synchronize ()
+    synchronize () *)
 end
+
+exception Break
 
 let init_game conf =
   let player = { y = conf.window_height /. 2.; velocity = 0.; alive = true } in
@@ -238,7 +241,7 @@ let evaluator g =
   let fitness = !state.time + (1000 * !state.score) in
   float fitness
 
-let play_visual_game genome config generation =
+(* let play_visual_game genome config generation =
   let phenotype = Phenotype.create_phenotype genome in
   let state = ref (init_game config) in
   let continue = ref true in
@@ -255,13 +258,97 @@ let play_visual_game genome config generation =
     if (not !state.player.alive) || !state.time > 3600 then continue := false;
 
     Unix.sleepf 0.016
-  done
+  done *)
+
+let play_visual_population genomes config generation =
+  (* 1. Création des phénotypes pour toute la population *)
+  let population =
+    List.map
+      (fun g ->
+        ( Phenotype.create_phenotype g,
+          { y = config.window_height /. 2.; velocity = 0.; alive = true } ))
+      genomes
+  in
+
+  (* Initialisation de l'environnement partagé (tuyaux vides au début) *)
+  let rec loop birds pipes score time =
+    (* --- RENDU GRAPHIQUE --- *)
+    View.clear ();
+    View.draw_pipes pipes config.pipe_width config.window_height config.pipe_gap;
+
+    (* Dessiner tous les oiseaux vivants *)
+    List.iter
+      (fun (_, bird) ->
+        if bird.alive then View.draw_bird bird config.bird_radius)
+      birds;
+
+    View.draw_score score generation;
+    Graphics.synchronize ();
+
+    (* 1. Mise à jour de l'environnement (Tuyaux) UNE SEULE FOIS pour tous *)
+    (* On utilise update_pipes qui gère le déplacement et l'ajout  *)
+    let moved_pipes, to_score = update_pipes config pipes in
+
+    (* 2. Mise à jour de chaque oiseau individuellement *)
+    let next_birds =
+      List.map
+        (fun (phenotype, bird) ->
+          if not bird.alive then (phenotype, bird)
+            (* L'oiseau mort reste mort *)
+          else
+            (* On crée un état temporaire juste pour utiliser get_inputs  *)
+            (* Cela permet de réutiliser votre logique de vision existante *)
+            let temp_state =
+              {
+                player = bird;
+                pipes;
+                (* L'oiseau voit les tuyaux actuels *)
+                score;
+                time;
+                config;
+              }
+            in
+
+            let inputs = get_inputs temp_state in
+            let pred = List.hd (Phenotype.predict phenotype inputs) in
+            let jump = pred > 0.5 in
+
+            (* Physique de l'oiseau *)
+            let new_bird_phys = update_bird config bird jump in
+
+            (* Vérification des collisions avec les NOUVEAUX tuyaux *)
+            let is_alive =
+              new_bird_phys.alive
+              && not (check_collision config new_bird_phys moved_pipes)
+            in
+
+            (phenotype, { new_bird_phys with alive = is_alive }))
+        birds
+    in
+
+    (* 3. Gestion du score et continuation *)
+    let any_alive = List.exists (fun (_, b) -> b.alive) next_birds in
+
+    (* Si au moins un oiseau vit et qu'on n'a pas dépassé le temps limite *)
+    if any_alive && time < 3600 then (
+      let new_score = if to_score then score + 1 else score in
+      Unix.sleepf 0.016;
+      (* Maintien du framerate ~60fps *)
+      loop next_birds moved_pipes new_score (time + 1))
+    (* Sinon, la simulation visuelle s'arrête *)
+      else ()
+  in
+
+  (* Lancement de la boucle avec des tuyaux vides et un score de 0 *)
+  loop population [] 0 0
 
 let main () =
+  Random.self_init ();
   let number_inputs = 3 in
   let number_outputs = 1 in
   let pop_size = 300 in
   let epochs = 100 in
+  let target_fitness = 30000. in
 
   View.open_window 400. 600.;
 
@@ -271,38 +358,61 @@ let main () =
     ref (Evolution.create_pop pop_size number_inputs number_outputs innov)
   in
   let l_species = ref [] in
+  (try
+     for epoch = 0 to epochs - 1 do
+       let new_pop, new_sp, genomes_evaluated =
+         Evolution.generation !pop !l_species evaluator innov dynamic_threshold
+       in
+       pop := new_pop;
+       l_species := new_sp;
 
-  for epoch = 0 to epochs - 1 do
-    let new_pop, new_sp, genomes_evaluated =
-      Evolution.generation !pop !l_species evaluator innov dynamic_threshold
-    in
-    pop := new_pop;
-    l_species := new_sp;
+       let best_genome =
+         List.fold_left
+           (fun (acc : Types.genome) (g : Types.genome) ->
+             if g.fitness > acc.fitness then g else acc)
+           (List.hd genomes_evaluated)
+           genomes_evaluated
+       in
 
-    let best_genome =
-      List.fold_left
-        (fun (acc : Types.genome) (g : Types.genome) ->
-          if g.fitness > acc.fitness then g else acc)
-        (List.hd genomes_evaluated)
-        genomes_evaluated
-    in
+       Evolution.print_pop_summary !pop !l_species epoch;
 
-    play_visual_game best_genome
-      {
-        window_width = 400.;
-        window_height = 600.;
-        bird_radius = 15.;
-        gravity = 1800.;
-        jump_strength = 500.;
-        pipe_width = 60.;
-        pipe_gap = 140.;
-        pipe_interval = 250.;
-        speed_x = 200.;
-        tau = 0.016;
-      }
-      epoch;
+       play_visual_population genomes_evaluated
+         {
+           window_width = 400.;
+           window_height = 600.;
+           bird_radius = 15.;
+           gravity = 1800.;
+           jump_strength = 500.;
+           pipe_width = 60.;
+           pipe_gap = 140.;
+           pipe_interval = 250.;
+           speed_x = 200.;
+           tau = 0.016;
+         }
+         epoch;
 
-    Evolution.print_pop_summary !pop !l_species epoch
-  done
+       if best_genome.fitness > target_fitness then raise Break
+     done
+   with
+  | Break -> ()
+  | exn -> raise exn);
+
+  let best_genome =
+    List.fold_left
+      (fun (acc : genome) (g : genome) ->
+        if g.fitness > acc.fitness then g else acc)
+      (List.hd !pop.genomes) !pop.genomes
+  in
+  let filename = "flappy_net" in
+  Parser.save_model best_genome filename;
+
+  Graphics.close_graph ();
+
+  Visualizer.init_window ();
+  Visualizer.draw_genome best_genome;
+  Graphics.synchronize ();
+
+  ignore (Graphics.read_key ());
+  Graphics.close_graph ()
 
 let () = main ()

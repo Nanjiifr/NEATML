@@ -1,7 +1,6 @@
 open Types
 
-(* let sigmoid x = 1. /. (1. +. exp (-1. *. x)) *)
-let sigmoid x = x
+let sigmoid x = 1. /. (1. +. exp (-1. *. x))
 
 let reset_network nn =
   Hashtbl.iter

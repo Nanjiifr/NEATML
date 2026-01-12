@@ -2,9 +2,8 @@ open Graphics
 open Types
 
 let win_width = 1000 (* Largeur de la fenêtre *)
-let net_height = 500 (* Hauteur réservée au réseau (en bas) *)
-let game_height = 400 (* Hauteur réservée au jeu (en haut) *)
-let win_height = net_height + game_height
+let net_height = 500
+let win_height = net_height
 let color_sensor = rgb 100 200 100
 let color_output = rgb 200 100 100
 let color_hidden = rgb 150 150 255
