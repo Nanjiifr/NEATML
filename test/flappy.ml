@@ -374,9 +374,16 @@ let main () =
            genomes_evaluated
        in
 
+       let sorted_genomes =
+         List.sort
+           (fun g1 g2 -> compare g2.fitness g1.fitness)
+           genomes_evaluated
+       in
+       let to_simulate = List.take 30 sorted_genomes in
+
        Evolution.print_pop_summary !pop !l_species epoch;
 
-       play_visual_population genomes_evaluated
+       play_visual_population to_simulate
          {
            window_width = 400.;
            window_height = 600.;
