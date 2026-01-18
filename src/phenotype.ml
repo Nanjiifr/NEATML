@@ -38,7 +38,7 @@ let create_phenotype g =
 
 let predict nn ninputs =
   let ninputs = 1. :: ninputs in
-  let epochs = 50 in
+  let epochs = 1 in
   if List.length ninputs <> List.length nn.inputs then
     failwith "Predict : wrong input size\n";
   List.iter2

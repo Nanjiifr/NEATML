@@ -19,7 +19,7 @@ let create_pop pop_size number_inputs number_outputs innov_global =
             {
               in_node = id_in;
               out_node = id_out;
-              weight = 0.;
+              weight = Random.float 4. -. 2.;
               enabled = true;
               innov =
                 Innovation.get_innov_id innov_global id_in id_out Connexion;
