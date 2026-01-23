@@ -263,9 +263,19 @@ let generation pop l_species evaluator innov_global dynamic_treshold =
 
 let rec get_digits n = match n / 10 with 0 -> 1 | n' -> 1 + get_digits n'
 
+(* ANSI Color codes *)
+let color_bold = "\027[1m"
+let color_red = "\027[31m"
+let color_green = "\027[32m"
+let color_yellow = "\027[33m"
+let color_blue = "\027[34m"
+let color_magenta = "\027[35m"
+let color_cyan = "\027[36m"
+let color_reset = "\027[0m"
+
 let print_pop_summary pop l_species epoch max_epochs =
   (* --- Constants for layout --- *)
-  let lines_to_clear = 17 in
+  let lines_to_clear = 18 in
   (* Must match the total lines printed below *)
 
   (* --- Move cursor up and clear lines if not first epoch --- *)
@@ -278,15 +288,30 @@ let print_pop_summary pop l_species epoch max_epochs =
   in
   let filled = int_of_float (float width *. progress) in
   let bar = String.make filled '#' ^ String.make (max 0 (width - filled)) '.' in
-  Printf.printf "\rProgress: [%s] %3d%% (%d/%d)\027[K\n" bar
+  
+  let bar_color = if progress >= 1.0 then color_green else color_cyan in
+
+  Printf.printf "\rProgress: [%s%s%s%s] %3d%% (%d/%d)\027[K\n" 
+    color_bold bar_color bar color_reset
     (int_of_float (progress *. 100.))
     epoch max_epochs;
 
   (* --- Header --- *)
-  Printf.printf "===================== Epoch %d =====================\027[K\n"
-    epoch;
-  Printf.printf "=============== POPULATION SUMMARY ===============\027[K\n";
-  Printf.printf "--------------------------------------------------\027[K\n";
+  let epoch_text = Printf.sprintf " Epoch %d " epoch in
+  let total_width = 50 in
+  let padding = total_width - String.length epoch_text in
+  let left_pad = padding / 2 in
+  let right_pad = padding - left_pad in
+  let epoch_line =
+    String.make left_pad '=' ^ epoch_text ^ String.make right_pad '='
+  in
+
+  Printf.printf "%s%s%s\027[K\n" (color_bold ^ color_blue) epoch_line
+    color_reset;
+  Printf.printf "%s=============== POPULATION SUMMARY ===============%s\027[K\n"
+    (color_bold ^ color_blue) color_reset;
+  Printf.printf "%s--------------------------------------------------%s\027[K\n"
+    color_blue color_reset;
 
   (* --- Species Table (Fixed Height: Header + 5 rows) --- *)
   let sorted_species =
@@ -296,21 +321,30 @@ let print_pop_summary pop l_species epoch max_epochs =
          l_species)
   in
 
-  Printf.printf "Species [%d active(s)]:\027[K\n" (List.length l_species);
-  Printf.printf "  %-4s | %-8s | %-12s | %-8s\027[K\n" "ID" "Members" "Best Fit"
-    "Stagn";
-  Printf.printf "  -----+----------+--------------+--------\027[K\n";
+  Printf.printf "Species [%s%d active(s)%s]:\027[K\n" 
+    (color_bold ^ color_green) (List.length l_species) color_reset;
+  Printf.printf "  %s%-4s | %-8s | %-12s | %-8s%s\027[K\n" 
+    color_bold "ID" "Members" "Best Fit" "Stagn" color_reset;
+  Printf.printf "  %s-----+----------+--------------+--------%s\027[K\n" color_blue color_reset;
 
   (* Print top 5 species, pad with empty lines if fewer than 5 *)
   for i = 0 to 4 do
     if i < List.length sorted_species then
       let s = List.nth sorted_species i in
-      Printf.printf "  %-4d | %-8d | %-12.4f | %-8d\027[K\n" s.sp_id
-        (List.length s.members) s.best_fitness s.stagn_count
+      let stagn_color = 
+        if s.stagn_count > 10 then color_red 
+        else if s.stagn_count > 5 then color_yellow 
+        else "" 
+      in
+      Printf.printf "  %-4d | %-8d | %-12.4f | %s%-8d%s\027[K\n" s.sp_id
+        (List.length s.members) s.best_fitness 
+        stagn_color s.stagn_count color_reset
     else Printf.printf "                                          \027[K\n"
   done;
 
-  (* --- Best Genome Stats (Fixed Height: ~4 lines) --- *)
+  (* --- Best Genome Stats (Fixed Height: ~6 lines) --- *)
+  (* 1 blank line + 1 header + 3 stats + 1 separator = 6 lines *)
+  
   let best_genome_opt =
     match pop.genomes with
     | [] -> None
@@ -324,17 +358,31 @@ let print_pop_summary pop l_species epoch max_epochs =
   (match best_genome_opt with
   | Some g ->
       let enabled_conns = List.filter (fun c -> c.enabled) g.connections in
-      Printf.printf "\nGlobal Best Genome Stats:\027[K\n";
-      Printf.printf "  Fitness     : %.4f\027[K\n" g.fitness;
+      Printf.printf "\n%sGlobal Best Genome Stats:%s\027[K\n" (color_bold ^ color_magenta) color_reset;
+      Printf.printf "  Fitness     : %s%.4f%s\027[K\n" (color_bold ^ color_green) g.fitness color_reset;
       Printf.printf "  Nodes       : %d\027[K\n" (List.length g.nodes);
       Printf.printf "  Connections : %d (Enabled: %d)\027[K\n"
         (List.length g.connections)
-        (List.length enabled_conns)
+        (List.length enabled_conns);
+      Printf.printf "%s==================================================%s\027[K\n" color_blue color_reset
   | None ->
-      Printf.printf "\nGlobal Best Genome: N/A (Population empty)\027[K\n";
+      Printf.printf "\n%sGlobal Best Genome: N/A (Population empty)%s\027[K\n" color_red color_reset;
       Printf.printf " \027[K\n";
       Printf.printf " \027[K\n";
       Printf.printf " \027[K\n";
 
-      Printf.printf "==================================================\027[K\n");
+      Printf.printf "%s==================================================%s\027[K\n" color_blue color_reset);
+  flush stdout
+
+let print_training_stats total_evals duration avg_fitness best_fitness =
+  let hours = int_of_float duration / 3600 in
+  let minutes = (int_of_float duration mod 3600) / 60 in
+  let seconds = mod_float duration 60. in
+
+  Printf.printf "\n%s================= TRAINING STATS ==================%s\n" (color_bold ^ color_blue) color_reset;
+  Printf.printf "  %sTotal Evaluations :%s %d\n" color_bold color_reset total_evals;
+  Printf.printf "  %sTotal Time        :%s %02dh %02dm %05.2fs\n" color_bold color_reset hours minutes seconds;
+  Printf.printf "  %sAverage Fitness   :%s %.4f\n" color_bold color_reset avg_fitness;
+  Printf.printf "  %sBest Fitness      :%s %s%.4f%s\n" color_bold color_reset (color_bold ^ color_green) best_fitness color_reset;
+  Printf.printf "%s==================================================%s\n" (color_bold ^ color_blue) color_reset;
   flush stdout

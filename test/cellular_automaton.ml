@@ -183,8 +183,12 @@ let _main () =
   let l_species = ref [] in
   let dynamic_threshold = ref 3. in
 
+  let start_time = Unix.gettimeofday () in
+  let total_evals = ref 0 in
+
   (try
      for epoch = 0 to epochs - 1 do
+       total_evals := !total_evals + pop_size;
        let dataset = create_dataset n k in
        let new_pop, new_species, genomes_evaluated =
          Evolution.generation !pop !l_species (evaluator n r dataset) innov
@@ -209,11 +213,17 @@ let _main () =
   | Break -> ()
   | exn -> raise exn);
 
+  let duration = Unix.gettimeofday () -. start_time in
   let best_genome =
     List.fold_left
       (fun acc g -> if g.fitness > acc.fitness then g else acc)
       (List.hd !pop.genomes) !pop.genomes
   in
+  let avg_fitness =
+    let sum = List.fold_left (fun acc g -> acc +. g.fitness) 0. !pop.genomes in
+    sum /. float pop_size
+  in
+  Evolution.print_training_stats !total_evals duration avg_fitness best_genome.fitness;
 
   visualize_best_genome n r best_genome;
 

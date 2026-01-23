@@ -328,8 +328,13 @@ let main () =
     ref (Evolution.create_pop pop_size number_inputs number_outputs innov)
   in
   let l_species = ref [] in
+
+  let start_time = Unix.gettimeofday () in
+  let total_evals = ref 0 in
+
   (try
      for epoch = 0 to epochs - 1 do
+       total_evals := !total_evals + pop_size;
        let new_pop, new_sp, genomes_evaluated =
          Evolution.generation !pop !l_species evaluator innov dynamic_threshold
        in
@@ -374,12 +379,21 @@ let main () =
   | Break -> ()
   | exn -> raise exn);
 
+  let duration = Unix.gettimeofday () -. start_time in
   let best_genome =
     List.fold_left
       (fun (acc : genome) (g : genome) ->
         if g.fitness > acc.fitness then g else acc)
       (List.hd !pop.genomes) !pop.genomes
   in
+
+  let avg_fitness =
+    let sum = List.fold_left (fun acc g -> acc +. g.fitness) 0. !pop.genomes in
+    sum /. float pop_size
+  in
+  Evolution.print_training_stats !total_evals duration avg_fitness
+    best_genome.fitness;
+
   let filename = "flappy_net" in
   Parser.save_model best_genome filename;
 

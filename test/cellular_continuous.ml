@@ -170,8 +170,8 @@ let visualize_best_genome (n : int) (r : int) (n_channels : int) (g : genome) :
 let _main () =
   Random.self_init ();
   let n = 99 in
-  let k = 250 in
-  let r = 3 in
+  let k = 100 in
+  let r = 2 in
 
   let n_channels = 1 in
 
@@ -193,8 +193,12 @@ let _main () =
   let l_species = ref [] in
   let dynamic_threshold = ref 3. in
 
+  let start_time = Unix.gettimeofday () in
+  let total_evals = ref 0 in
+
   (try
      for epoch = 0 to epochs - 1 do
+       total_evals := !total_evals + pop_size;
        let dataset = create_dataset n k in
        let new_pop, new_species, genomes_evaluated =
          Evolution.generation !pop !l_species
@@ -219,11 +223,19 @@ let _main () =
    with
   | Break -> ()
   | exn -> raise exn);
+
+  let duration = Unix.gettimeofday () -. start_time in
   let best_genome =
     List.fold_left
       (fun acc g -> if g.fitness > acc.fitness then g else acc)
       (List.hd !pop.genomes) !pop.genomes
   in
+  let avg_fitness =
+    let sum = List.fold_left (fun acc g -> acc +. g.fitness) 0. !pop.genomes in
+    sum /. float pop_size
+  in
+  Evolution.print_training_stats !total_evals duration avg_fitness
+    best_genome.fitness;
 
   visualize_best_genome n r n_channels best_genome;
   Visualizer.init_window ();
@@ -236,8 +248,8 @@ let _main () =
 
 let _test_best () =
   Random.self_init ();
-  let n = 149 in
-  let r = 3 in
+  let n = 99 in
+  let r = 2 in
   let k = 10 in
 
   let n_channels = 1 in
@@ -291,4 +303,4 @@ let _test_best () =
       Printf.printf "\n\n")
     dataset
 
-let () = _main ()
+let () = _test_best ()
