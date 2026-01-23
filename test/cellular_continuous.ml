@@ -18,14 +18,18 @@ let create_dataset (n : int) (k : int) : automaton array =
 
 let get_inputs (index : int) (states : automaton) (sigs : signals) (n : int)
     (r : int) =
-  let inputs = ref [] in
-  for delta = -r to r do
+  let acc = ref [] in
+  for delta = r downto -r do
     let neighbor_idx = (((index + delta) mod n) + n) mod n in
-    let state_val = if states.(neighbor_idx) then 1.0 else 0.0 in
     let signal_vals = sigs.(neighbor_idx) in
-    inputs := !inputs @ (state_val :: Array.to_list signal_vals)
+    let len = Array.length signal_vals in
+    for i = len - 1 downto 0 do
+      acc := signal_vals.(i) :: !acc
+    done;
+    let state_val = if states.(neighbor_idx) then 1.0 else 0.0 in
+    acc := state_val :: !acc
   done;
-  !inputs
+  !acc
 
 let get_density (a : automaton) =
   let n = Array.length a in
@@ -39,30 +43,47 @@ let evaluator (n : int) (r : int) (n_channels : int) (dataset : automaton array)
 
   let total_reward = ref 0. in
 
+  (* Pre-allocate buffers for double buffering *)
+  let buf_states_1 = Array.make n false in
+  let buf_states_2 = Array.make n false in
+  let buf_signals_1 = Array.make_matrix n n_channels 0. in
+  let buf_signals_2 = Array.make_matrix n n_channels 0. in
+
   Array.iter
     (fun initial_state ->
       Array.iter Phenotype.reset_network nets;
 
-      let current_states = ref (Array.copy initial_state) in
-      let current_signals = ref (Array.make_matrix n n_channels 0.) in
+      (* Initialize first buffer *)
+      Array.blit initial_state 0 buf_states_1 0 n;
+      (* Reset signal buffer 1 *)
+      for i = 0 to n - 1 do
+        let row = buf_signals_1.(i) in
+        for j = 0 to n_channels - 1 do
+          row.(j) <- 0.
+        done
+      done;
+
+      let current_states = ref buf_states_1 in
+      let next_states = ref buf_states_2 in
+      let current_signals = ref buf_signals_1 in
+      let next_signals = ref buf_signals_2 in
 
       let density = get_density !current_states in
       let target = if density > 0.5 then 1 else 0 in
 
       (try
          for _ = 0 to n - 1 do
-           let prev_states = !current_states in
-           let prev_signals = !current_signals in
-
-           let next_states = Array.make n false in
-           let next_signals = Array.make_matrix n n_channels 0. in
+           let c_states = !current_states in
+           let c_sigs = !current_signals in
+           let n_states = !next_states in
+           let n_sigs = !next_signals in
 
            for i = 0 to n - 1 do
-             let inputs = get_inputs i prev_states prev_signals n r in
+             let inputs = get_inputs i c_states c_sigs n r in
 
              match Phenotype.predict nets.(i) inputs with
              | new_state_raw :: new_signal_vals ->
-                 next_states.(i) <- new_state_raw > 0.5;
+                 n_states.(i) <- new_state_raw > 0.5;
 
                  if List.length new_signal_vals <> n_channels then
                    failwith
@@ -70,13 +91,20 @@ let evaluator (n : int) (r : int) (n_channels : int) (dataset : automaton array)
                         "Error: expected output size %d (1 State + %d Signals)"
                         (1 + n_channels) n_channels);
 
-                 next_signals.(i) <- Array.of_list new_signal_vals
+                 let row = n_sigs.(i) in
+                 List.iteri (fun idx v -> row.(idx) <- v) new_signal_vals
              | [] -> failwith "Error: Empty output from phenotype"
            done;
-           if next_states = prev_states then raise Break;
+           if n_states = c_states then raise Break;
 
-           current_states := next_states;
-           current_signals := next_signals
+           (* Swap buffers *)
+           let tmp_s = !current_states in
+           current_states := !next_states;
+           next_states := tmp_s;
+
+           let tmp_sig = !current_signals in
+           current_signals := !next_signals;
+           next_signals := tmp_sig
          done
        with
       | Break -> ()
@@ -142,7 +170,7 @@ let visualize_best_genome (n : int) (r : int) (n_channels : int) (g : genome) :
 let _main () =
   Random.self_init ();
   let n = 99 in
-  let k = 50 in
+  let k = 250 in
   let r = 3 in
 
   let n_channels = 1 in
@@ -177,7 +205,7 @@ let _main () =
        pop := new_pop;
        l_species := new_species;
 
-       Evolution.print_pop_summary !pop !l_species epoch;
+       Evolution.print_pop_summary !pop !l_species epoch epochs;
 
        let best_genome =
          List.fold_left
@@ -263,4 +291,4 @@ let _test_best () =
       Printf.printf "\n\n")
     dataset
 
-let () = _test_best ()
+let () = _main ()

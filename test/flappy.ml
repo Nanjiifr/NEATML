@@ -54,8 +54,6 @@ module View = struct
 
     List.iter
       (fun p ->
-        (* C'est ici que la correction "centrée" s'applique : *)
-        (* Coin gauche = Centre X - Demi-largeur *)
         let left_x = int_of_float (p.x -. half_width) in
         let w = int_of_float width in
 
@@ -82,13 +80,13 @@ module View = struct
     moveto 10 10;
     draw_string (Printf.sprintf "Gen: %d | Score: %d" generation score)
 
-  (* let render state generation =
+  let _render state generation =
     clear ();
     draw_pipes state.pipes state.config.pipe_width state.config.window_height
       state.config.pipe_gap;
     draw_bird state.player state.config.bird_radius;
     draw_score state.score generation;
-    synchronize () *)
+    synchronize ()
 end
 
 exception Break
@@ -204,9 +202,7 @@ let get_inputs state =
   | Some p ->
       [
         (p.x -. bird_x) /. state.config.window_width;
-        (* Dist X relative *)
         (p.gap_y -. state.player.y) /. state.config.window_height;
-        (* Dist Y relative *)
         state.player.velocity
         /. 10.0 (* Normalisation approximative de la vitesse *);
       ]
@@ -241,13 +237,13 @@ let evaluator g =
   let fitness = !state.time + (1000 * !state.score) in
   float fitness
 
-(* let play_visual_game genome config generation =
+let _play_visual_game genome config generation =
   let phenotype = Phenotype.create_phenotype genome in
   let state = ref (init_game config) in
   let continue = ref true in
 
   while !continue do
-    View.render !state generation;
+    View._render !state generation;
 
     let inputs = get_inputs !state in
     let pred = List.hd (Phenotype.predict phenotype inputs) in
@@ -258,10 +254,9 @@ let evaluator g =
     if (not !state.player.alive) || !state.time > 3600 then continue := false;
 
     Unix.sleepf 0.016
-  done *)
+  done
 
 let play_visual_population genomes config generation =
-  (* 1. Création des phénotypes pour toute la population *)
   let population =
     List.map
       (fun g ->
@@ -270,13 +265,10 @@ let play_visual_population genomes config generation =
       genomes
   in
 
-  (* Initialisation de l'environnement partagé (tuyaux vides au début) *)
   let rec loop birds pipes score time =
-    (* --- RENDU GRAPHIQUE --- *)
     View.clear ();
     View.draw_pipes pipes config.pipe_width config.window_height config.pipe_gap;
 
-    (* Dessiner tous les oiseaux vivants *)
     List.iter
       (fun (_, bird) ->
         if bird.alive then View.draw_bird bird config.bird_radius)
@@ -285,38 +277,21 @@ let play_visual_population genomes config generation =
     View.draw_score score generation;
     Graphics.synchronize ();
 
-    (* 1. Mise à jour de l'environnement (Tuyaux) UNE SEULE FOIS pour tous *)
-    (* On utilise update_pipes qui gère le déplacement et l'ajout  *)
     let moved_pipes, to_score = update_pipes config pipes in
 
-    (* 2. Mise à jour de chaque oiseau individuellement *)
     let next_birds =
       List.map
         (fun (phenotype, bird) ->
           if not bird.alive then (phenotype, bird)
-            (* L'oiseau mort reste mort *)
           else
-            (* On crée un état temporaire juste pour utiliser get_inputs  *)
-            (* Cela permet de réutiliser votre logique de vision existante *)
-            let temp_state =
-              {
-                player = bird;
-                pipes;
-                (* L'oiseau voit les tuyaux actuels *)
-                score;
-                time;
-                config;
-              }
-            in
+            let temp_state = { player = bird; pipes; score; time; config } in
 
             let inputs = get_inputs temp_state in
             let pred = List.hd (Phenotype.predict phenotype inputs) in
             let jump = pred > 0.5 in
 
-            (* Physique de l'oiseau *)
             let new_bird_phys = update_bird config bird jump in
 
-            (* Vérification des collisions avec les NOUVEAUX tuyaux *)
             let is_alive =
               new_bird_phys.alive
               && not (check_collision config new_bird_phys moved_pipes)
@@ -326,20 +301,15 @@ let play_visual_population genomes config generation =
         birds
     in
 
-    (* 3. Gestion du score et continuation *)
     let any_alive = List.exists (fun (_, b) -> b.alive) next_birds in
 
-    (* Si au moins un oiseau vit et qu'on n'a pas dépassé le temps limite *)
-    if any_alive && time < 3600 then (
+    if any_alive && time < 1800 then (
       let new_score = if to_score then score + 1 else score in
-      Unix.sleepf 0.016;
-      (* Maintien du framerate ~60fps *)
+      Unix.sleepf 0.01;
       loop next_birds moved_pipes new_score (time + 1))
-    (* Sinon, la simulation visuelle s'arrête *)
-      else ()
+    else ()
   in
 
-  (* Lancement de la boucle avec des tuyaux vides et un score de 0 *)
   loop population [] 0 0
 
 let main () =
@@ -381,7 +351,7 @@ let main () =
        in
        let to_simulate = List.take 30 sorted_genomes in
 
-       Evolution.print_pop_summary !pop !l_species epoch;
+       Evolution.print_pop_summary !pop !l_species epoch epochs;
 
        play_visual_population to_simulate
          {

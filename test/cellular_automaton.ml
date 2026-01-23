@@ -194,7 +194,7 @@ let _main () =
        pop := new_pop;
        l_species := new_species;
 
-       Evolution.print_pop_summary !pop !l_species epoch;
+       Evolution.print_pop_summary !pop !l_species epoch epochs;
 
        let best_genome =
          List.fold_left

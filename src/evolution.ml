@@ -263,14 +263,32 @@ let generation pop l_species evaluator innov_global dynamic_treshold =
 
 let rec get_digits n = match n / 10 with 0 -> 1 | n' -> 1 + get_digits n'
 
-let print_pop_summary pop l_species epoch =
-  Printf.printf "==================================================%s\n"
-    (String.make (get_digits epoch) '=');
-  Printf.printf "===================== Epoch %d =====================\n" epoch;
-  Printf.printf "=============== POPULATION SUMMARY ===============%s\n"
-    (String.make (get_digits epoch) '=');
-  Printf.printf "==================================================%s\n"
-    (String.make (get_digits epoch) '=');
+let print_pop_summary pop l_species epoch max_epochs =
+  (* --- Constants for layout --- *)
+  let lines_to_clear = 17 in
+  (* Must match the total lines printed below *)
+
+  (* --- Move cursor up and clear lines if not first epoch --- *)
+  if epoch > 0 then Printf.printf "\027[%dA" lines_to_clear;
+
+  (* --- Progress Bar --- *)
+  let width = 50 in
+  let progress =
+    if max_epochs > 0 then float epoch /. float max_epochs else 0.
+  in
+  let filled = int_of_float (float width *. progress) in
+  let bar = String.make filled '#' ^ String.make (max 0 (width - filled)) '.' in
+  Printf.printf "\rProgress: [%s] %3d%% (%d/%d)\027[K\n" bar
+    (int_of_float (progress *. 100.))
+    epoch max_epochs;
+
+  (* --- Header --- *)
+  Printf.printf "===================== Epoch %d =====================\027[K\n"
+    epoch;
+  Printf.printf "=============== POPULATION SUMMARY ===============\027[K\n";
+  Printf.printf "--------------------------------------------------\027[K\n";
+
+  (* --- Species Table (Fixed Height: Header + 5 rows) --- *)
   let sorted_species =
     List.take 5
       (List.sort
@@ -278,17 +296,21 @@ let print_pop_summary pop l_species epoch =
          l_species)
   in
 
-  Printf.printf "Species [%d active(s)]:\n" (List.length l_species);
-  Printf.printf "  %-4s | %-8s | %-12s | %-8s\n" "ID" "Members" "Best Fit"
+  Printf.printf "Species [%d active(s)]:\027[K\n" (List.length l_species);
+  Printf.printf "  %-4s | %-8s | %-12s | %-8s\027[K\n" "ID" "Members" "Best Fit"
     "Stagn";
-  Printf.printf "  -----+----------+--------------+--------\n";
+  Printf.printf "  -----+----------+--------------+--------\027[K\n";
 
-  List.iter
-    (fun s ->
-      Printf.printf "  %-4d | %-8d | %-12.4f | %-8d\n" s.sp_id
-        (List.length s.members) s.best_fitness s.stagn_count)
-    sorted_species;
+  (* Print top 5 species, pad with empty lines if fewer than 5 *)
+  for i = 0 to 4 do
+    if i < List.length sorted_species then
+      let s = List.nth sorted_species i in
+      Printf.printf "  %-4d | %-8d | %-12.4f | %-8d\027[K\n" s.sp_id
+        (List.length s.members) s.best_fitness s.stagn_count
+    else Printf.printf "                                          \027[K\n"
+  done;
 
+  (* --- Best Genome Stats (Fixed Height: ~4 lines) --- *)
   let best_genome_opt =
     match pop.genomes with
     | [] -> None
@@ -302,15 +324,17 @@ let print_pop_summary pop l_species epoch =
   (match best_genome_opt with
   | Some g ->
       let enabled_conns = List.filter (fun c -> c.enabled) g.connections in
-      Printf.printf "\nGlobal Best Genome Stats:\n";
-      Printf.printf "  Fitness     : %.4f\n" g.fitness;
-      Printf.printf "  Nodes       : %d\n" (List.length g.nodes);
-      Printf.printf "  Connections : %d (Enabled: %d)\n\n"
+      Printf.printf "\nGlobal Best Genome Stats:\027[K\n";
+      Printf.printf "  Fitness     : %.4f\027[K\n" g.fitness;
+      Printf.printf "  Nodes       : %d\027[K\n" (List.length g.nodes);
+      Printf.printf "  Connections : %d (Enabled: %d)\027[K\n"
         (List.length g.connections)
         (List.length enabled_conns)
   | None ->
-      Printf.printf "\nGlobal Best Genome: N/A (Population vide)\n";
+      Printf.printf "\nGlobal Best Genome: N/A (Population empty)\027[K\n";
+      Printf.printf " \027[K\n";
+      Printf.printf " \027[K\n";
+      Printf.printf " \027[K\n";
 
-      Printf.printf "==================================================%s\n\n"
-        (String.make (get_digits epoch) '='));
+      Printf.printf "==================================================\027[K\n");
   flush stdout
