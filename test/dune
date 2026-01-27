@@ -1,5 +1,5 @@
 (executables
- (names flappy cellular_automaton cellular_continuous snake)
+(names flappy cellular_automaton cellular_continuous snake)
  (modules flappy cellular_automaton cellular_continuous snake)
  (libraries graphics unix neatml)
 )

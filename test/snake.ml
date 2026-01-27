@@ -2,10 +2,10 @@ open Neatml
 open Types
 
 (* --- Configurations --- *)
-let grid_width = 20
-let grid_height = 20
-let pixel_size = 20
-let max_moves_without_food = 100 (* More leeway for long snakes *)
+let grid_width = 15
+let grid_height = 15
+let pixel_size = 30
+let max_moves_without_food = 50 (* More leeway for long snakes *)
 
 (* --- Types --- *)
 type direction = North | East | South | West
@@ -221,7 +221,7 @@ let get_dir_inputs state =
   | West -> [ 0.; 0.; 0.; 1. ]
 
 (* --- Flood Fill --- *)
-let get_accessibility_inputs state =
+let _get_accessibility_inputs state =
   let head = List.hd state.snake in
   let total_cells = grid_width * grid_height in
   let occupied = Array.make_matrix grid_width grid_height false in
@@ -287,8 +287,7 @@ let get_inputs state =
   let food = get_food_inputs state in
   let tail = get_tail_inputs state in
   let dir = get_dir_inputs state in
-  let access = get_accessibility_inputs state in
-  obstacles @ food @ tail @ dir @ access
+  obstacles @ food @ tail @ dir
 
 (* --- View --- *)
 module View = struct
@@ -385,15 +384,15 @@ exception Break
 let main () =
   Random.self_init ();
   (* Inputs: 8 Dirs * 2 + 4 Food + 4 Tail + 4 Dir + 4 Access = 32 Inputs *)
-  let input_size = 32 in
+  let input_size = 28 in
   let output_size = 4 in
 
   let pop_size = 300 in
   let epochs = 1000 in
   let target_fitness = 10000. in
-  let maps_per_genome = 5 in
+  let maps_per_genome = 25 in
 
-  let innov = Innovation.create (input_size + output_size + 1) in
+  let innov = Innovation.create (input_size + output_size + 5) in
   let pop = ref (Evolution.create_pop pop_size input_size output_size innov) in
   let l_species = ref [] in
   let dynamic_threshold = ref 3. in
@@ -405,6 +404,7 @@ let main () =
   (try
      for epoch = 0 to epochs - 1 do
        total_evals := !total_evals + pop_size;
+       Random.init 42;
        let map_seeds = List.init maps_per_genome (fun _ -> Random.bits ()) in
 
        let multi_map_evaluator g =
@@ -432,7 +432,7 @@ let main () =
            genomes_evaluated
        in
 
-       if best_genome.fitness > 2500. && epoch mod 100 = 0 then (
+       if epoch mod 25 = 0 then (
          if not !window_open then (
            View.open_window ();
            window_open := true);

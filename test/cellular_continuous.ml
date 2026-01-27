@@ -196,10 +196,11 @@ let _main () =
   let start_time = Unix.gettimeofday () in
   let total_evals = ref 0 in
 
+  let dataset = create_dataset n k in
+
   (try
      for epoch = 0 to epochs - 1 do
        total_evals := !total_evals + pop_size;
-       let dataset = create_dataset n k in
        let new_pop, new_species, genomes_evaluated =
          Evolution.generation !pop !l_species
            (evaluator n r n_channels dataset)
@@ -303,4 +304,4 @@ let _test_best () =
       Printf.printf "\n\n")
     dataset
 
-let () = _test_best ()
+let () = _main ()
