@@ -1,6 +1,14 @@
 open Neatml
 open Types
 
+(* Helper function for List.take which doesn't exist in older OCaml *)
+let list_take n lst =
+  let rec aux n acc = function
+    | [] -> List.rev acc
+    | h :: t -> if n <= 0 then List.rev acc else aux (n - 1) (h :: acc) t
+  in
+  aux n [] lst
+
 type config = {
   gravity : float;
   jump_strength : float;
@@ -336,7 +344,7 @@ let main () =
      for epoch = 0 to epochs - 1 do
        total_evals := !total_evals + pop_size;
        let new_pop, new_sp, genomes_evaluated =
-         Evolution.generation !pop !l_species evaluator innov dynamic_threshold
+         Evolution.generation !pop !l_species evaluator innov dynamic_threshold ()
        in
        pop := new_pop;
        l_species := new_sp;
@@ -354,7 +362,7 @@ let main () =
            (fun g1 g2 -> compare g2.fitness g1.fitness)
            genomes_evaluated
        in
-       let to_simulate = List.take 30 sorted_genomes in
+       let to_simulate = list_take 30 sorted_genomes in
 
        Evolution.print_pop_summary !pop !l_species epoch epochs;
 

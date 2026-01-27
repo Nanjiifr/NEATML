@@ -3,6 +3,14 @@ open Mutation
 open Speciation
 open Types
 
+(* Helper function for List.take which doesn't exist in older OCaml *)
+let list_take n lst =
+  let rec aux n acc = function
+    | [] -> List.rev acc
+    | h :: t -> if n <= 0 then List.rev acc else aux (n - 1) (h :: acc) t
+  in
+  aux n [] lst
+
 let create_pop pop_size number_inputs number_outputs innov_global =
   let genomes = ref [] in
   for _ = 0 to pop_size - 1 do
@@ -178,7 +186,7 @@ let reproduce_species s best_genome innov =
 
   let to_take = max 1 (n_members / 2) in
 
-  let parents_list = List.take to_take sorted_members in
+  let parents_list = list_take to_take sorted_members in
   let parents = Array.of_list parents_list in
 
   let n_parents = Array.length parents in
@@ -213,11 +221,20 @@ let delete_stagn l_species =
        (fun acc s -> if s.stagn_count <= 15 then s :: acc else acc)
        [] l_species)
 
-let generation pop l_species evaluator innov_global dynamic_treshold =
+let generation pop l_species evaluator innov_global dynamic_treshold ?hyperneat_config () =
   let new_fitness_genomes =
     Parmap.parmap ~ncores:8
       (fun g ->
-        let new_fitness = evaluator g in
+        let eval_genome = 
+          match hyperneat_config with
+          | Some hn_config ->
+              (* For HyperNEAT: g is a CPPN, convert to substrate network *)
+              Hyperneat.create_substrate_network g hn_config
+          | None ->
+              (* For regular NEAT: use genome directly *)
+              g
+        in
+        let new_fitness = evaluator eval_genome in
         { g with fitness = new_fitness })
       (Parmap.L pop.genomes)
   in
@@ -315,7 +332,7 @@ let print_pop_summary pop l_species epoch max_epochs =
 
   (* --- Species Table (Fixed Height: Header + 5 rows) --- *)
   let sorted_species =
-    List.take 5
+    list_take 5
       (List.sort
          (fun s1 s2 -> compare s2.best_fitness s1.best_fitness)
          l_species)

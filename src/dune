@@ -9,6 +9,7 @@
 	speciation
 	evolution
   parser
-	visualizer)
+	visualizer
+	hyperneat)
  (libraries unix parmap graphics))
 
