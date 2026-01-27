@@ -1,4 +1,11 @@
 (executables
  (names flappy cellular_automaton cellular_continuous snake)
+ (modules flappy cellular_automaton cellular_continuous snake)
  (libraries graphics unix neatml)
+)
+
+(executable
+ (name test_hyperneat)
+ (modules test_hyperneat)
+ (libraries unix neatml)
 )

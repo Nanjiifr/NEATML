@@ -26,12 +26,15 @@ let query_cppn cppn_network source_coord target_coord =
 let create_substrate_network cppn_genome config =
   let cppn = create_phenotype cppn_genome in
   
-  (* Build list of all substrate nodes *)
+  (* Create bias node at id 0 *)
+  let bias_node = { position = [0.; 0.]; layer = 0; node_id = 0 } in
+  
+  (* Build list of all substrate nodes (starting from id 1 for inputs) *)
   let input_nodes = List.mapi (fun i coord -> 
-    { position = coord; layer = 0; node_id = i }
+    { position = coord; layer = 0; node_id = i + 1 }
   ) config.substrate.input_coords in
   
-  let hidden_offset = List.length input_nodes in
+  let hidden_offset = 1 + List.length input_nodes in
   let hidden_nodes = List.mapi (fun i coord -> 
     { position = coord; layer = 1; node_id = hidden_offset + i }
   ) config.substrate.hidden_coords in
@@ -41,7 +44,7 @@ let create_substrate_network cppn_genome config =
     { position = coord; layer = 2; node_id = output_offset + i }
   ) config.substrate.output_coords in
   
-  let all_nodes = input_nodes @ hidden_nodes @ output_nodes in
+  let all_nodes = bias_node :: input_nodes @ hidden_nodes @ output_nodes in
   
   (* Query CPPN for all potential connections (feedforward only) *)
   let connections = ref [] in
