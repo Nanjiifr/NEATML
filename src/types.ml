@@ -54,3 +54,22 @@ type species = {
   stagn_count : int;
   spawn_amount : int;
 }
+
+(* HyperNEAT types *)
+type substrate_node = {
+  position : float list; (* Coordinates in the substrate space *)
+  layer : int; (* 0=input, 1=hidden, 2=output, etc. *)
+  node_id : int;
+}
+
+type substrate_config = {
+  input_coords : float list list;
+  hidden_coords : float list list;
+  output_coords : float list list;
+}
+
+type hyperneat_config = {
+  substrate : substrate_config;
+  weight_threshold : float; (* Minimum weight to create connection *)
+  use_leo : bool; (* Link Expression Output - only express links above threshold *)
+}

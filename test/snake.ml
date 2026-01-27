@@ -418,7 +418,7 @@ let main () =
 
        let new_pop, new_sp, genomes_evaluated =
          Evolution.generation !pop !l_species multi_map_evaluator innov
-           dynamic_threshold
+           dynamic_threshold ()
        in
        pop := new_pop;
        l_species := new_sp;
