@@ -208,9 +208,16 @@ let delete_empty_sp l_species =
        [] l_species)
 
 let delete_stagn l_species =
+  (* Find global max fitness across all species to identify the best species *)
+  let global_best_fitness = 
+    List.fold_left (fun acc s -> max acc s.best_fitness) 0. l_species 
+  in
   List.rev
     (List.fold_left
-       (fun acc s -> if s.stagn_count <= 15 then s :: acc else acc)
+       (fun acc s -> 
+         (* Keep if stagnation is low OR it contains the global best *)
+         if s.stagn_count <= 15 || s.best_fitness >= global_best_fitness then s :: acc 
+         else acc)
        [] l_species)
 
 let generation pop l_species evaluator innov_global dynamic_treshold =

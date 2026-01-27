@@ -24,18 +24,26 @@ type genome = {
 }
 
 type population = { pop_size : int; genomes : genome list }
-type incoming_link = { source_id : int; weight : float }
 
-type neuron = {
-  kind : node_type;
-  incoming : incoming_link list;
+(* --- FastNet Types --- *)
+type connection = {
+  src_idx : int;
+  weight : float;
+}
+
+type fast_neuron = {
   mutable value : float;
+  kind : node_type;
+  incoming : connection array;
 }
 
 type network = {
-  neuron_map : (int, neuron) Hashtbl.t;
-  inputs : int list;
-  outputs : int list;
+  neurons : fast_neuron array;
+  input_indices : int array;
+  output_indices : int array;
+  topo_order : int array;
+  neuron_map : (int, int) Hashtbl.t; (* Map ID -> Array Index for lookup *)
+  original_map : (int, node_gene) Hashtbl.t option; (* Optional: Keep track of original nodes for viz if needed *)
 }
 
 type species = {
