@@ -204,7 +204,7 @@ let _main () =
        let new_pop, new_species, genomes_evaluated =
          Evolution.generation !pop !l_species
            (evaluator n r n_channels dataset)
-           innov dynamic_threshold
+           innov dynamic_threshold ()
        in
 
        pop := new_pop;

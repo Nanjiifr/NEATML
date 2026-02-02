@@ -217,22 +217,32 @@ let delete_empty_sp l_species =
 
 let delete_stagn l_species =
   (* Find global max fitness across all species to identify the best species *)
-  let global_best_fitness = 
-    List.fold_left (fun acc s -> max acc s.best_fitness) 0. l_species 
+  let global_best_fitness =
+    List.fold_left (fun acc s -> max acc s.best_fitness) 0. l_species
   in
   List.rev
     (List.fold_left
-       (fun acc s -> 
+       (fun acc s ->
          (* Keep if stagnation is low OR it contains the global best *)
-         if s.stagn_count <= 15 || s.best_fitness >= global_best_fitness then s :: acc 
+         if s.stagn_count <= 15 || s.best_fitness >= global_best_fitness then
+           s :: acc
          else acc)
        [] l_species)
 
-let generation pop l_species evaluator innov_global dynamic_treshold ?hyperneat_config () =
+let generation pop l_species evaluator innov_global dynamic_treshold
+    ?hyperneat_config () =
+  
+  (* Find best from PREVIOUS generation (to ensure monotonicity) *)
+  let best_from_prev = 
+    match pop.genomes with
+    | [] -> None
+    | h :: t -> Some (List.fold_left (fun acc g -> if g.fitness > acc.fitness then g else acc) h t)
+  in
+
   let new_fitness_genomes =
     Parmap.parmap ~ncores:8
       (fun g ->
-        let eval_genome = 
+        let eval_genome =
           match hyperneat_config with
           | Some hn_config ->
               (* For HyperNEAT: g is a CPPN, convert to substrate network *)
@@ -244,6 +254,13 @@ let generation pop l_species evaluator innov_global dynamic_treshold ?hyperneat_
         let new_fitness = evaluator eval_genome in
         { g with fitness = new_fitness })
       (Parmap.L pop.genomes)
+  in
+
+  (* Explicitly add the previous best to the pool to prevent fitness drop due to noise *)
+  let new_fitness_genomes = 
+    match best_from_prev with
+    | Some best -> best :: new_fitness_genomes
+    | None -> new_fitness_genomes
   in
 
   let target_species = 20 in
@@ -312,11 +329,11 @@ let print_pop_summary pop l_species epoch max_epochs =
   in
   let filled = int_of_float (float width *. progress) in
   let bar = String.make filled '#' ^ String.make (max 0 (width - filled)) '.' in
-  
+
   let bar_color = if progress >= 1.0 then color_green else color_cyan in
 
-  Printf.printf "\rProgress: [%s%s%s%s] %3d%% (%d/%d)\027[K\n" 
-    color_bold bar_color bar color_reset
+  Printf.printf "\rProgress: [%s%s%s%s] %3d%% (%d/%d)\027[K\n" color_bold
+    bar_color bar color_reset
     (int_of_float (progress *. 100.))
     epoch max_epochs;
 
@@ -345,30 +362,30 @@ let print_pop_summary pop l_species epoch max_epochs =
          l_species)
   in
 
-  Printf.printf "Species [%s%d active(s)%s]:\027[K\n" 
-    (color_bold ^ color_green) (List.length l_species) color_reset;
-  Printf.printf "  %s%-4s | %-8s | %-12s | %-8s%s\027[K\n" 
-    color_bold "ID" "Members" "Best Fit" "Stagn" color_reset;
-  Printf.printf "  %s-----+----------+--------------+--------%s\027[K\n" color_blue color_reset;
+  Printf.printf "Species [%s%d active(s)%s]:\027[K\n" (color_bold ^ color_green)
+    (List.length l_species) color_reset;
+  Printf.printf "  %s%-4s | %-8s | %-12s | %-8s%s\027[K\n" color_bold "ID"
+    "Members" "Best Fit" "Stagn" color_reset;
+  Printf.printf "  %s-----+----------+--------------+--------%s\027[K\n"
+    color_blue color_reset;
 
   (* Print top 5 species, pad with empty lines if fewer than 5 *)
   for i = 0 to 4 do
     if i < List.length sorted_species then
       let s = List.nth sorted_species i in
-      let stagn_color = 
-        if s.stagn_count > 10 then color_red 
-        else if s.stagn_count > 5 then color_yellow 
-        else "" 
+      let stagn_color =
+        if s.stagn_count > 10 then color_red
+        else if s.stagn_count > 5 then color_yellow
+        else ""
       in
       Printf.printf "  %-4d | %-8d | %-12.4f | %s%-8d%s\027[K\n" s.sp_id
-        (List.length s.members) s.best_fitness 
-        stagn_color s.stagn_count color_reset
+        (List.length s.members) s.best_fitness stagn_color s.stagn_count
+        color_reset
     else Printf.printf "                                          \027[K\n"
   done;
 
   (* --- Best Genome Stats (Fixed Height: ~6 lines) --- *)
   (* 1 blank line + 1 header + 3 stats + 1 separator = 6 lines *)
-  
   let best_genome_opt =
     match pop.genomes with
     | [] -> None
@@ -382,31 +399,45 @@ let print_pop_summary pop l_species epoch max_epochs =
   (match best_genome_opt with
   | Some g ->
       let enabled_conns = List.filter (fun c -> c.enabled) g.connections in
-      Printf.printf "\n%sGlobal Best Genome Stats:%s\027[K\n" (color_bold ^ color_magenta) color_reset;
-      Printf.printf "  Fitness     : %s%.4f%s\027[K\n" (color_bold ^ color_green) g.fitness color_reset;
+      Printf.printf "\n%sGlobal Best Genome Stats:%s\027[K\n"
+        (color_bold ^ color_magenta)
+        color_reset;
+      Printf.printf "  Fitness     : %s%.4f%s\027[K\n"
+        (color_bold ^ color_green) g.fitness color_reset;
       Printf.printf "  Nodes       : %d\027[K\n" (List.length g.nodes);
       Printf.printf "  Connections : %d (Enabled: %d)\027[K\n"
         (List.length g.connections)
         (List.length enabled_conns);
-      Printf.printf "%s==================================================%s\027[K\n" color_blue color_reset
+      Printf.printf
+        "%s==================================================%s\027[K\n"
+        color_blue color_reset
   | None ->
-      Printf.printf "\n%sGlobal Best Genome: N/A (Population empty)%s\027[K\n" color_red color_reset;
+      Printf.printf "\n%sGlobal Best Genome: N/A (Population empty)%s\027[K\n"
+        color_red color_reset;
       Printf.printf " \027[K\n";
       Printf.printf " \027[K\n";
       Printf.printf " \027[K\n";
 
-      Printf.printf "%s==================================================%s\027[K\n" color_blue color_reset);
+      Printf.printf
+        "%s==================================================%s\027[K\n"
+        color_blue color_reset);
   flush stdout
 
 let print_training_stats total_evals duration avg_fitness best_fitness =
   let hours = int_of_float duration / 3600 in
-  let minutes = (int_of_float duration mod 3600) / 60 in
+  let minutes = int_of_float duration mod 3600 / 60 in
   let seconds = mod_float duration 60. in
 
-  Printf.printf "\n%s================= TRAINING STATS ==================%s\n" (color_bold ^ color_blue) color_reset;
-  Printf.printf "  %sTotal Evaluations :%s %d\n" color_bold color_reset total_evals;
-  Printf.printf "  %sTotal Time        :%s %02dh %02dm %05.2fs\n" color_bold color_reset hours minutes seconds;
-  Printf.printf "  %sAverage Fitness   :%s %.4f\n" color_bold color_reset avg_fitness;
-  Printf.printf "  %sBest Fitness      :%s %s%.4f%s\n" color_bold color_reset (color_bold ^ color_green) best_fitness color_reset;
-  Printf.printf "%s==================================================%s\n" (color_bold ^ color_blue) color_reset;
+  Printf.printf "\n%s================= TRAINING STATS ==================%s\n"
+    (color_bold ^ color_blue) color_reset;
+  Printf.printf "  %sTotal Evaluations :%s %d\n" color_bold color_reset
+    total_evals;
+  Printf.printf "  %sTotal Time        :%s %02dh %02dm %05.2fs\n" color_bold
+    color_reset hours minutes seconds;
+  Printf.printf "  %sAverage Fitness   :%s %.4f\n" color_bold color_reset
+    avg_fitness;
+  Printf.printf "  %sBest Fitness      :%s %s%.4f%s\n" color_bold color_reset
+    (color_bold ^ color_green) best_fitness color_reset;
+  Printf.printf "%s==================================================%s\n"
+    (color_bold ^ color_blue) color_reset;
   flush stdout

@@ -1,6 +1,6 @@
 (executables
-(names flappy cellular_automaton cellular_continuous snake)
- (modules flappy cellular_automaton cellular_continuous snake)
+(names flappy cellular_automaton cellular_continuous snake density_continuous xor_nn sine)
+ (modules flappy cellular_automaton cellular_continuous snake density_continuous xor_nn sine)
  (libraries graphics unix neatml)
 )
 

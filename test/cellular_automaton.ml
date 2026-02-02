@@ -192,7 +192,7 @@ let _main () =
        let dataset = create_dataset n k in
        let new_pop, new_species, genomes_evaluated =
          Evolution.generation !pop !l_species (evaluator n r dataset) innov
-           dynamic_threshold
+           dynamic_threshold ()
        in
 
        pop := new_pop;
@@ -223,7 +223,8 @@ let _main () =
     let sum = List.fold_left (fun acc g -> acc +. g.fitness) 0. !pop.genomes in
     sum /. float pop_size
   in
-  Evolution.print_training_stats !total_evals duration avg_fitness best_genome.fitness;
+  Evolution.print_training_stats !total_evals duration avg_fitness
+    best_genome.fitness;
 
   visualize_best_genome n r best_genome;
 

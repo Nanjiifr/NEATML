@@ -1,15 +1,6 @@
+(include_subdirs unqualified)
+
 (library
  (name neatml)
- (modules
-	types
-	innovation
-	genome
-	mutation
-	phenotype
-	speciation
-	evolution
-  parser
-	visualizer
-	hyperneat)
- (libraries unix parmap graphics))
+ (libraries unix parmap graphics metal ctypes))
 
