@@ -455,3 +455,15 @@ let add_bias x bias =
     x
 
 let conv2d _ _ _ = failwith "Use fused kernels"
+
+(* Cleanup function to release all resources and clear buffer pools *)
+let cleanup () =
+  (* Sync any pending commands *)
+  sync ();
+  (* Clear buffer pools *)
+  match !ctx_ref with
+  | Some ctx ->
+      Queue.clear ctx.int_buffer_pool;
+      Queue.clear ctx.float_buffer_pool;
+      ctx.commands_in_buffer <- 0
+  | None -> ()

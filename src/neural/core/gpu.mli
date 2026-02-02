@@ -5,6 +5,7 @@ val to_cpu : tensor -> float array array
 val copy_inplace : tensor -> tensor -> unit
 val sync : unit -> unit
 val commit_batch : unit -> unit
+val cleanup : unit -> unit
 
 val linear_fwd : tensor -> tensor -> tensor -> int -> int -> int -> int -> tensor
 val linear_bwd : tensor -> tensor -> tensor -> tensor -> tensor -> tensor -> int -> int -> int -> int -> tensor
