@@ -7,11 +7,16 @@ type t = MSE | MAE | RMSE | CROSS_ENTROPY
     @param y_pred The predicted values, shape (batch_size, n_classes)
     @return The gradient tensor of the same shape as y_pred *)
 let grad_error (err : t) (y_true : Tensor.t) (y_pred : Tensor.t) : Tensor.t =
-  let n = Array.length y_true in
+  let n = Utils.rows y_true in
   match err with
   | MSE ->
-      Utils.map2_mat (fun y p ->
-          -2.0 *. (y -. p) /. float_of_int n) y_true y_pred
+      (match y_true, y_pred with
+       | Tensor.GPU gt, Tensor.GPU gp -> Tensor.GPU (Gpu.mse_grad gp gt (-2.0 /. float_of_int n))
+       | _ -> 
+          let y_true_cpu = Utils.to_cpu y_true in
+          let y_pred_cpu = Utils.to_cpu y_pred in
+          let res = Utils.map2_mat (fun y p -> -2.0 *. (y -. p) /. float_of_int n) (Tensor.CPU y_true_cpu) (Tensor.CPU y_pred_cpu) in
+          Tensor.CPU (Utils.to_cpu res))
   | MAE ->
       Utils.map2_mat (fun y p ->
           let diff = y -. p in
@@ -29,13 +34,15 @@ let grad_error (err : t) (y_true : Tensor.t) (y_pred : Tensor.t) : Tensor.t =
     @param real The true values
     @return The MAE loss value *)
 let mae (model : Tensor.t) (real : Tensor.t) =
-  let n = Float.of_int (Array.length model.(0)) in
-  let m = Float.of_int (Array.length model) in
+  let model_cpu = Utils.to_cpu model in
+  let real_cpu = Utils.to_cpu real in
+  let n = Float.of_int (Array.length model_cpu.(0)) in
+  let m = Float.of_int (Array.length model_cpu) in
   let temp =
-    Array.init (Array.length model) (fun i ->
+    Array.init (Array.length model_cpu) (fun i ->
         Array.mapi
-          (fun j _ -> Float.abs (model.(i).(j) -. real.(i).(j)) /. n)
-          model.(i))
+          (fun j _ -> Float.abs (model_cpu.(i).(j) -. real_cpu.(i).(j)) /. n)
+          model_cpu.(i))
   in
   Array.fold_left
     (fun acc v ->
@@ -48,13 +55,15 @@ let mae (model : Tensor.t) (real : Tensor.t) =
     @param real The true values
     @return The MSE loss value *)
 let mse (model : Tensor.t) (real : Tensor.t) =
-  let n = Float.of_int (Array.length model.(0)) in
-  let m = Float.of_int (Array.length model) in
+  let model_cpu = Utils.to_cpu model in
+  let real_cpu = Utils.to_cpu real in
+  let n = Float.of_int (Array.length model_cpu.(0)) in
+  let m = Float.of_int (Array.length model_cpu) in
   let temp =
-    Array.init (Array.length model) (fun i ->
+    Array.init (Array.length model_cpu) (fun i ->
         Array.mapi
-          (fun j _ -> Float.pow (model.(i).(j) -. real.(i).(j)) 2. /. n)
-          model.(i))
+          (fun j _ -> Float.pow (model_cpu.(i).(j) -. real_cpu.(i).(j)) 2. /. n)
+          model_cpu.(i))
   in
   Array.fold_left
     (fun acc v ->
@@ -68,16 +77,18 @@ let mse (model : Tensor.t) (real : Tensor.t) =
     @param real The true labels (one-hot encoded)
     @return The cross-entropy loss value *)
 let cross_entropy (model : Tensor.t) (real : Tensor.t) =
+  let model_cpu = Utils.to_cpu model in
+  let real_cpu = Utils.to_cpu real in
   let epsilon = 1e-12 in
-  let batch_size = Float.of_int (Array.length model) in
+  let batch_size = Float.of_int (Array.length model_cpu) in
   let tmp =
     Array.mapi
       (fun i _ ->
         -.Array.fold_left ( +. ) 0.
             (Array.map2
                (fun label prob -> label *. log (prob +. epsilon))
-               real.(i) model.(i)))
-      model
+               real_cpu.(i) model_cpu.(i)))
+      model_cpu
   in
   Array.fold_left ( +. ) 0. tmp /. batch_size
 

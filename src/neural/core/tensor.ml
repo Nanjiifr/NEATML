@@ -1,3 +1,6 @@
-(** Tensor type representing 2D arrays (matrices) of floating-point numbers.
-    Used throughout the neural network for representing data, weights, and gradients. *)
-type t = float array array ;;
+type cpu_tensor = float array array
+type gpu_tensor = Gpu.tensor
+
+type t = 
+  | CPU of cpu_tensor
+  | GPU of gpu_tensor
