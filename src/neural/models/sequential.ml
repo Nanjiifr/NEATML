@@ -24,15 +24,19 @@ let backward_seq (network : t) (grad_output : Tensor.t) =
 
   List.iter
     (fun l ->
+      let current_grad = !upstream_grad in
       match l with 
       | Layer.Linear layer ->
-          let g = Linear.backward layer !upstream_grad in
-          upstream_grad := g.d_input;
-          gradients := g :: !gradients
+          let grads_rec = Linear.backward layer current_grad in
+          upstream_grad := grads_rec.d_input;
+          gradients := grads_rec :: !gradients;
+          (* Release the gradient that was just processed IF it's not the one we just created *)
+          (match current_grad with Tensor.GPU g_tensor when current_grad <> grads_rec.d_input -> Gpu.release g_tensor | _ -> ())
       | Layer.Conv2d layer ->
-          let g = Conv2d.backward layer !upstream_grad in
-          upstream_grad := g.d_input;
-          gradients := g :: !gradients
+          let grads_rec = Conv2d.backward layer current_grad in
+          upstream_grad := grads_rec.d_input;
+          gradients := grads_rec :: !gradients;
+          (match current_grad with Tensor.GPU g_tensor when current_grad <> grads_rec.d_input -> Gpu.release g_tensor | _ -> ())
     )
     (List.rev network.layers);
 

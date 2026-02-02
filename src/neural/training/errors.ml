@@ -11,7 +11,7 @@ let grad_error (err : t) (y_true : Tensor.t) (y_pred : Tensor.t) : Tensor.t =
   match err with
   | MSE ->
       (match y_true, y_pred with
-       | Tensor.GPU gt, Tensor.GPU gp -> Tensor.GPU (Gpu.mse_grad gp gt (-2.0 /. float_of_int n))
+       | Tensor.GPU gt, Tensor.GPU gp -> Tensor.GPU (Gpu.mse_grad gp gt (2.0 /. float_of_int n))
        | _ -> 
           let y_true_cpu = Utils.to_cpu y_true in
           let y_pred_cpu = Utils.to_cpu y_pred in

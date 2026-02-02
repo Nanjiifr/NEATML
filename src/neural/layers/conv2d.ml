@@ -212,4 +212,4 @@ let backward layer upstream_grad =
       done
   done;
   
-  { Gradients.d_input = CPU d_inputs; d_weights = Gradients.Conv layer.grad_weights; d_bias = layer.grad_bias }
+  { Gradients.d_input = CPU d_inputs; d_weights = Gradients.Conv layer.grad_weights; d_bias = CPU [| layer.grad_bias |] }

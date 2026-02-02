@@ -6,5 +6,5 @@ type weight_grad =
 type t = {
   d_input : Tensor.t; (* Gradient with respect to inputs *)
   d_weights : weight_grad; (* Gradient with respect to weights *)
-  d_bias : float array; (* Gradient with respect to biases *)
+  d_bias : Tensor.t; (* Gradient with respect to biases *)
 }

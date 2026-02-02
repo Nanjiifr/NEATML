@@ -7,12 +7,12 @@ let disable_gpu () = use_gpu := false
 let rows (t : Tensor.t) = 
   match t with
   | CPU m -> Array.length m
-  | GPU g -> (Gpu.to_cpu g |> Array.length) (* Helper access, slow but correct *)
+  | GPU g -> g.Gpu.rows
 
 let cols (t : Tensor.t) = 
   match t with
   | CPU m -> if Array.length m = 0 then 0 else Array.length m.(0)
-  | GPU g -> (Gpu.to_cpu g |> fun m -> if Array.length m = 0 then 0 else Array.length m.(0))
+  | GPU g -> g.Gpu.cols
 
 (* Constructor always creates CPU tensor initially, can be moved later *)
 let zeros r c = CPU (Array.init r (fun _ -> Array.make c 0.0))

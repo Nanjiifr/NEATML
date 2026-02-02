@@ -64,16 +64,29 @@ let backward layer upstream =
       let in_dim = cols layer.weights in
       let act = act_to_int layer.activation in
       let d_in_g = Gpu.linear_bwd up_g in_g w_g out_g gw_g gb_g batch out_dim in_dim act in
-      { Gradients.d_input = GPU d_in_g; d_weights = Gradients.Dense layer.grad_weights; d_bias = to_cpu layer.grad_bias |> fun m -> m.(0) }
+      { Gradients.d_input = GPU d_in_g; d_weights = Gradients.Dense layer.grad_weights; d_bias = layer.grad_bias }
   | _ -> failwith "Linear.backward: CPU fallback not implemented in full GPU mode"
 
 let zero_grad layer =
+
+  (match layer.input_cache with Some (GPU g) -> Gpu.release g | _ -> ());
+
+  (match layer.preact_cache with Some (GPU g) -> Gpu.release g | _ -> ());
+
+  layer.input_cache <- None;
+
+  layer.preact_cache <- None;
+
   match layer.grad_weights, layer.grad_bias with
+
   | GPU gw, GPU gb ->
-      let zw = Gpu.of_cpu (Array.make_matrix (rows layer.grad_weights) (cols layer.grad_weights) 0.0) in
-      let zb = Gpu.of_cpu [| Array.make (cols layer.grad_bias) 0.0 |] in
-      Gpu.copy_inplace zw gw;
-      Gpu.copy_inplace zb gb
+
+      Gpu.zero_tensor gw;
+
+      Gpu.zero_tensor gb
+
   | _ -> 
+
       layer.grad_weights <- zeros (rows layer.grad_weights) (cols layer.grad_weights);
+
       layer.grad_bias <- zeros (rows layer.grad_bias) (cols layer.grad_bias)

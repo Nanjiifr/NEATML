@@ -1,8 +1,12 @@
-type tensor
+open Metal
+
+type tensor = { buffer : Buffer.t; rows : int; cols : int; mutable released : bool }
 
 val of_cpu : float array array -> tensor
 val to_cpu : tensor -> float array array
 val copy_inplace : tensor -> tensor -> unit
+val zero_tensor : tensor -> unit
+val release : tensor -> unit
 val sync : unit -> unit
 val commit_batch : unit -> unit
 val cleanup : unit -> unit
