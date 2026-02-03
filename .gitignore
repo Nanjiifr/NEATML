@@ -29,3 +29,5 @@ _opam/
 \#*#
 
 .vscode/
+
+/test/mnist_data/
