@@ -6,7 +6,7 @@ open Neural.Core
 
 let create_dataset n =
   Array.init n (fun _ ->
-      let seed = Random.float (2. *. Float.pi) in
+      let seed = Random.float (4. *. Float.pi) in
       (seed, sin seed))
 
 let () =
@@ -43,7 +43,7 @@ let () =
 
   (* 3. Use a larger model (Hidden layer: 128 neurons) *)
   let hidden_dim = 256 in
-  let batch_size = 128 in
+  let batch_size = 256 in
 
   let hidden_layer = Linear.create 1 hidden_dim batch_size Activations.ReLU in
   let output_layer = Linear.create hidden_dim 1 batch_size Activations.Tanh in
@@ -65,7 +65,7 @@ let () =
   flush stdout;
 
   (* Optimizer.fit now reports timing per epoch *)
-  Optimizer.fit model x_train y_train x_test y_test batch_size 100 optimizers
+  Optimizer.fit model x_train y_train x_test y_test batch_size 500 optimizers
     Errors.MSE;
 
   Printf.printf "\027[1;32m[SUCCESS]\027[0m Training complete. \n";
@@ -74,7 +74,7 @@ let () =
   let open Graphics in
   open_graph " 800x600";
   set_window_title "SINE Network: Reality vs Prediction";
-  
+
   let width = 800 in
   let height = 600 in
   let x_scale = float width /. (2. *. Float.pi) in
@@ -83,8 +83,10 @@ let () =
 
   (* Draw axes *)
   set_color (rgb 150 150 150);
-  moveto 0 y_offset; lineto width y_offset;
-  moveto 0 0; lineto 0 height;
+  moveto 0 y_offset;
+  lineto width y_offset;
+  moveto 0 0;
+  lineto 0 height;
 
   (* Plot Real Sine (Blue) *)
   set_color blue;
@@ -101,26 +103,32 @@ let () =
   set_line_width 2;
   let sample_points = 200 in
   for i = 0 to sample_points - 1 do
-    let x = (float i /. float sample_points) *. (2. *. Float.pi) in
+    let x = float i /. float sample_points *. (2. *. Float.pi) in
     let x_tensor = Tensor.CPU [| [| x |] |] in
     let x_gpu = if !Utils.use_gpu then Utils.to_gpu x_tensor else x_tensor in
     let pred_tensor = Sequential.forward_seq model x_gpu in
     let pred = (Utils.to_cpu pred_tensor).(0).(0) in
-    
+
     let x_px = int_of_float (x *. x_scale) in
     let y_px = int_of_float (pred *. y_scale) + y_offset in
-    
+
     if i = 0 then moveto x_px y_px else lineto x_px y_px;
-    
+
     (* Cleanup GPU prediction if needed *)
-    (match pred_tensor with Tensor.GPU g -> Gpu.release g | _ -> ());
-    (match x_gpu with Tensor.GPU g -> Gpu.release g | _ -> ())
+    (match pred_tensor with
+    | Tensor.GPU g -> Gpu.release g
+    | _ -> ());
+    match x_gpu with Tensor.GPU g -> Gpu.release g | _ -> ()
   done;
 
   (* Legend *)
-  set_color blue; moveto (width - 150) (height - 30); draw_string "Reality (sin x)";
-  set_color red; moveto (width - 150) (height - 50); draw_string "Prediction";
+  set_color blue;
+  moveto (width - 150) (height - 30);
+  draw_string "Reality (sin x)";
+  set_color red;
+  moveto (width - 150) (height - 50);
+  draw_string "Prediction";
 
   Printf.printf "Press any key to close the window...\n";
-  ignore (wait_next_event [Key_pressed]);
+  ignore (wait_next_event [ Key_pressed ]);
   close_graph ()
