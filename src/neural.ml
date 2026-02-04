@@ -19,4 +19,5 @@ end
 module Training = struct
   module Optimizer = Optimizer
   module Errors = Errors
+  module Metrics = Metrics
 end

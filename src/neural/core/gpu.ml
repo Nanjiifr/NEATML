@@ -125,6 +125,46 @@ kernel void add_bias(
     if (id.x >= uint(cols)) return;
     X[id.y * cols + id.x] += bias[id.x];
 }
+
+kernel void confusion_matrix_update(
+    device const float *preds [[buffer(0)]],
+    device const float *targets [[buffer(1)]],
+    device atomic_uint *cm [[buffer(2)]],
+    constant int &N [[buffer(3)]],
+    constant int &C [[buffer(4)]],
+    uint id [[thread_position_in_grid]])
+{
+    if (id >= uint(N)) return;
+    
+    // Find argmax for pred
+    int p_idx = 0;
+    float max_p = preds[id * C];
+    for (int i=1; i<C; i++) {
+        float val = preds[id * C + i];
+        if (val > max_p) { max_p = val; p_idx = i; }
+    }
+    
+    // Find argmax for target
+    int t_idx = 0;
+    float max_t = targets[id * C];
+    for (int i=1; i<C; i++) {
+        float val = targets[id * C + i];
+        if (val > max_t) { max_t = val; t_idx = i; }
+    }
+    
+    // Atomic add
+    atomic_fetch_add_explicit(&cm[t_idx * C + p_idx], 1, memory_order_relaxed);
+}
+
+kernel void cm_to_float(
+    device const atomic_uint *cm_in [[buffer(0)]],
+    device float *cm_out [[buffer(1)]],
+    constant uint &len [[buffer(2)]],
+    uint id [[thread_position_in_grid]])
+{
+    if (id >= len) return;
+    cm_out[id] = float(atomic_load_explicit(&cm_in[id], memory_order_relaxed));
+}
 |}
 
 type context = { 
@@ -183,7 +223,7 @@ let get_ctx () =
       let queue = CommandQueue.on_device device in
       let library = Library.on_device device ~source:shader_source (CompileOptions.init ()) in
       let pipelines = Hashtbl.create 16 in
-      let names = ["matmul";"mat_add";"relu_fwd";"sigmoid_fwd";"tanh_fwd";"linear_fwd";"linear_bwd_weights";"linear_bwd_input";"adam_step";"mse_grad";"mat_transpose";"add_bias";"zero_buf"] in
+      let names = ["matmul";"mat_add";"relu_fwd";"sigmoid_fwd";"tanh_fwd";"linear_fwd";"linear_bwd_weights";"linear_bwd_input";"adam_step";"mse_grad";"mat_transpose";"add_bias";"zero_buf";"confusion_matrix_update";"cm_to_float"] in
       List.iter (fun n -> Hashtbl.add pipelines n (let f = Library.new_function_with_name library n in fst (ComputePipelineState.on_device_with_function device f))) names;
       let ctx = { 
         device; 
@@ -542,6 +582,49 @@ let add_bias x bias =
     x
 
 let conv2d _ _ _ = failwith "Use fused kernels"
+
+let update_confusion_matrix preds targets cm =
+    let ctx = get_ctx () in
+    let n = preds.rows in
+    let c = preds.cols in
+    (* Validate dimensions *)
+    if targets.rows <> n || targets.cols <> c then failwith "Gpu.update_confusion_matrix: Dimension mismatch";
+    if cm.rows <> c || cm.cols <> c then failwith "Gpu.update_confusion_matrix: CM dimension mismatch";
+    
+    let enc = ComputeCommandEncoder.on_buffer (get_cb ctx) in
+    ComputeCommandEncoder.set_compute_pipeline_state enc (Hashtbl.find ctx.pipelines "confusion_matrix_update");
+    ComputeCommandEncoder.set_buffer enc preds.buffer ~index:0;
+    ComputeCommandEncoder.set_buffer enc targets.buffer ~index:1;
+    ComputeCommandEncoder.set_buffer enc cm.buffer ~index:2;
+    let buf_n = make_int_buf ctx n in
+    let buf_c = make_int_buf ctx c in
+    ComputeCommandEncoder.set_buffer enc buf_n ~index:3;
+    ComputeCommandEncoder.set_buffer enc buf_c ~index:4;
+    ComputeCommandEncoder.dispatch_threadgroups enc 
+        ~threadgroups_per_grid:{width=(n+1023)/1024; height=1; depth=1} 
+        ~threads_per_threadgroup:{width=1024; height=1; depth=1};
+    ComputeCommandEncoder.end_encoding enc;
+    increment_command_count ctx;
+    return_int_buf ctx buf_n;
+    return_int_buf ctx buf_c
+
+let cm_to_float_tensor cm =
+    let ctx = get_ctx () in
+    let len = cm.rows * cm.cols in
+    let out_b = get_buffer ctx (len * 4) in
+    let enc = ComputeCommandEncoder.on_buffer (get_cb ctx) in
+    ComputeCommandEncoder.set_compute_pipeline_state enc (Hashtbl.find ctx.pipelines "cm_to_float");
+    ComputeCommandEncoder.set_buffer enc cm.buffer ~index:0;
+    ComputeCommandEncoder.set_buffer enc out_b ~index:1;
+    let buf_len = make_int_buf ctx len in
+    ComputeCommandEncoder.set_buffer enc buf_len ~index:2;
+    ComputeCommandEncoder.dispatch_threadgroups enc
+        ~threadgroups_per_grid:{width=(len+1023)/1024; height=1; depth=1}
+        ~threads_per_threadgroup:{width=1024; height=1; depth=1};
+    ComputeCommandEncoder.end_encoding enc;
+    increment_command_count ctx;
+    return_int_buf ctx buf_len;
+    { buffer = out_b; rows = cm.rows; cols = cm.cols; released = false }
 
 let release (t : tensor) =
   if not t.released then begin

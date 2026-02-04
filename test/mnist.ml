@@ -76,10 +76,38 @@ let load_mnist_data () =
     to_tensor x_test_cpu,
     to_tensor y_test_cpu )
 
-let () =
+let main () =
   Random.self_init ();
 
   Utils.enable_gpu ();
   Printf.printf
     "\027[1;32m[SYSTEM]\027[0m GPU Acceleration Enabled: \027[1;33m%b\027[0m\n"
-    !Utils.use_gpu
+    !Utils.use_gpu;
+  let x_train, y_train, x_test, y_test = load_mnist_data () in
+  let input_size = 28 * 28 in
+  let output_size = 10 in
+  let hidden_size = 128 in
+  let batch_size = 256 in
+
+  let hidden1 =
+    Linear.create input_size hidden_size batch_size Activations.ReLU
+  in
+  let output_layer =
+    Linear.create hidden_size output_size batch_size Activations.Sigmoid
+  in
+
+  let model =
+    { Sequential.layers = [ Layer.Linear hidden1; Layer.Linear output_layer ] }
+  in
+
+  Metrics.evaluate model x_train y_train x_test y_test batch_size;
+
+  let lr = 0.001 in
+  let optimizer = Optimizer.create lr Optimizer.Adam model in
+
+  Optimizer.fit model x_train y_train x_test y_test batch_size 25 optimizer
+    Errors.CROSS_ENTROPY;
+
+  Metrics.evaluate model x_train y_train x_test y_test batch_size
+
+let () = main ()

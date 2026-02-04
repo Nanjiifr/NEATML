@@ -24,3 +24,6 @@ val tanh : tensor -> tensor
 val conv2d : string -> tensor -> tensor -> tensor
 val add_bias : tensor -> tensor -> tensor
 val transpose : tensor -> tensor
+
+val update_confusion_matrix : tensor -> tensor -> tensor -> unit
+val cm_to_float_tensor : tensor -> tensor
