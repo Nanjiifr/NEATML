@@ -14,13 +14,13 @@ let list_take n lst =
 let create_pop pop_size number_inputs number_outputs innov_global =
   let genomes = ref [] in
   for _ = 0 to pop_size - 1 do
-    let bias_node = { id = 0; kind = Sensor } in
+    let bias_node = { id = 0; kind = Sensor; activation = Identity } in
     let nodes = ref [] and connections = ref [] in
     let output_ids =
       List.init number_outputs (fun i -> i + number_inputs + 1)
     in
     for id_in = 1 to number_inputs do
-      let new_node = { id = id_in; kind = Sensor } in
+      let new_node = { id = id_in; kind = Sensor; activation = Identity } in
       List.iter
         (fun id_out ->
           connections :=
@@ -37,7 +37,13 @@ let create_pop pop_size number_inputs number_outputs innov_global =
       nodes := new_node :: !nodes
     done;
     for id_out = number_inputs + 1 to number_inputs + number_outputs do
-      let new_node = { id = id_out; kind = Output } in
+      let new_node =
+        {
+          id = id_out;
+          kind = Output;
+          activation = Mutation.random_activation ();
+        }
+      in
       nodes := new_node :: !nodes
     done;
     List.iter
@@ -231,12 +237,15 @@ let delete_stagn l_species =
 
 let generation pop l_species evaluator innov_global dynamic_treshold
     ?hyperneat_config () =
-  
   (* Find best from PREVIOUS generation (to ensure monotonicity) *)
-  let best_from_prev = 
+  let best_from_prev =
     match pop.genomes with
     | [] -> None
-    | h :: t -> Some (List.fold_left (fun acc g -> if g.fitness > acc.fitness then g else acc) h t)
+    | h :: t ->
+        Some
+          (List.fold_left
+             (fun acc g -> if g.fitness > acc.fitness then g else acc)
+             h t)
   in
 
   let new_fitness_genomes =
@@ -257,7 +266,7 @@ let generation pop l_species evaluator innov_global dynamic_treshold
   in
 
   (* Explicitly add the previous best to the pool to prevent fitness drop due to noise *)
-  let new_fitness_genomes = 
+  let new_fitness_genomes =
     match best_from_prev with
     | Some best -> best :: new_fitness_genomes
     | None -> new_fitness_genomes

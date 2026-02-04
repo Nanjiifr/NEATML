@@ -1,7 +1,15 @@
 open Types
 
-(* let sigmoid x = 1. /. (1. +. exp (-1. *. x)) *)
-let sigmoid x = x
+let activate x = function
+  | Sigmoid -> 1. /. (1. +. exp (-.x))
+  | Tanh -> tanh x
+  | Relu -> if x > 0. then x else 0.
+  | Gaussian -> exp (-.(x *. x))
+  | Sin -> sin x
+  | Cos -> cos x
+  | Abs -> abs_float x
+  | Square -> x *. x
+  | Identity -> x
 
 let create_phenotype g =
   (* Map ID -> Array Index *)
@@ -40,7 +48,8 @@ let create_phenotype g =
 
   let num_neurons = !idx_counter in
   let neurons =
-    Array.make num_neurons { value = 0.; kind = Hidden; incoming = [||] }
+    Array.make num_neurons
+      { value = 0.; kind = Hidden; activation = Tanh; incoming = [||] }
   in
 
   (* Build fast neurons *)
@@ -73,7 +82,13 @@ let create_phenotype g =
         |> List.filter (fun _ -> true) (* could filter dummy if needed *)
         |> Array.of_list
       in
-      neurons.(idx) <- { value = 0.; kind = n.kind; incoming = incoming_arr })
+      neurons.(idx) <-
+        {
+          value = 0.;
+          kind = n.kind;
+          activation = n.activation;
+          incoming = incoming_arr;
+        })
     g.nodes;
 
   let input_indices =
@@ -110,19 +125,6 @@ let reset_network nn =
 
 let predict nn inputs_list =
   let inputs = Array.of_list inputs_list in
-  (* Note: Standard Phenotype.predict expected 1. :: ninputs. 
-     Here we assume inputs_list contains exactly what the sensors need. 
-     If bias is handled as a sensor in the genome (id 0 usually), it should be in the input list provided by the user OR handled here.
-     In `evolution.ml`, bias is added as a Sensor node.
-     In old `phenotype.ml`, `let ninputs = 1. :: ninputs` was done.
-     So we must prepend 1.0 to the inputs array if the network expects it.
-     The convention in this project seems to be: Caller provides N inputs, Network has N+1 inputs (Bias + N).
-     Bias is usually the first sensor.
-  *)
-
-  (* Check size match *)
-  (* Network inputs size: Array.length nn.input_indices *)
-  (* If network has Bias + N inputs, and user provides N inputs, we prepend 1.0 *)
 
   let full_inputs =
     if Array.length nn.input_indices = Array.length inputs + 1 then
@@ -139,30 +141,28 @@ let predict nn inputs_list =
       nn.neurons.(idx).value <- full_inputs.(i)
   done;
 
-  (* Propagate (Epochs = 1) *)
-  (* Using a temp array for synchronous update logic if needed, or simple forward pass if sorted. 
-     The old implementation used a temp list and then updated. 
-     Let's stick to that "snapshot" behavior for consistency with recurrent connections. *)
   let updates = Array.make (Array.length nn.neurons) 0.0 in
   let active_indices = nn.topo_order in
 
-  (* Calculate activations *)
-  for k = 0 to Array.length active_indices - 1 do
-    let i = active_indices.(k) in
-    let n = nn.neurons.(i) in
-    let sum = ref 0. in
-    let incoming = n.incoming in
-    for j = 0 to Array.length incoming - 1 do
-      let conn = incoming.(j) in
-      sum := !sum +. (nn.neurons.(conn.src_idx).value *. conn.weight)
+  for _ = 0 to 10 do
+    (* Calculate activations *)
+    for k = 0 to Array.length active_indices - 1 do
+      let i = active_indices.(k) in
+      let n = nn.neurons.(i) in
+      let sum = ref 0. in
+      let incoming = n.incoming in
+      for j = 0 to Array.length incoming - 1 do
+        let conn = incoming.(j) in
+        sum := !sum +. (nn.neurons.(conn.src_idx).value *. conn.weight)
+      done;
+      updates.(i) <- activate !sum n.activation
     done;
-    updates.(i) <- sigmoid !sum
-  done;
 
-  (* Apply updates *)
-  for k = 0 to Array.length active_indices - 1 do
-    let i = active_indices.(k) in
-    nn.neurons.(i).value <- updates.(i)
+    (* Apply updates *)
+    for k = 0 to Array.length active_indices - 1 do
+      let i = active_indices.(k) in
+      nn.neurons.(i).value <- updates.(i)
+    done
   done;
 
   (* Gather outputs *)
@@ -170,12 +170,8 @@ let predict nn inputs_list =
   |> Array.to_list
 
 let predict_array nn inputs =
-  (* Same logic as predict but assumes array input and returns array output *)
-  (* Bias handling: If network expects Bias+N and inputs has N, we assume Bias is 1.0 and prepended virtually or we copy. 
-     To be fast, we might expect the caller to handle bias or we handle it efficiently. *)
   let full_inputs =
     if Array.length nn.input_indices = Array.length inputs + 1 then (
-      (* Prepend 1.0 - Copying is necessary unless we have a different API *)
       let arr = Array.make (Array.length inputs + 1) 1.0 in
       Array.blit inputs 0 arr 1 (Array.length inputs);
       arr)
@@ -202,7 +198,7 @@ let predict_array nn inputs =
       let conn = incoming.(j) in
       sum := !sum +. (nn.neurons.(conn.src_idx).value *. conn.weight)
     done;
-    updates.(i) <- sigmoid !sum
+    updates.(i) <- activate !sum n.activation
   done;
 
   for k = 0 to Array.length active_indices - 1 do

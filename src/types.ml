@@ -3,9 +3,10 @@ module IntSet = Set.Make (Int)
 type innovation_id = int
 type node_id = int
 type node_type = Sensor | Hidden | Output
+type activation = Sigmoid | Tanh | Relu | Gaussian | Sin | Cos | Abs | Square | Identity
 type mutation_type = Connexion | Node
 type mutation = { innov : innovation_id; kind : mutation_type }
-type node_gene = { id : node_id; kind : node_type }
+type node_gene = { id : node_id; kind : node_type; activation : activation }
 
 type connection_gene = {
   in_node : node_id;
@@ -34,6 +35,7 @@ type connection = {
 type fast_neuron = {
   mutable value : float;
   kind : node_type;
+  activation : activation;
   incoming : connection array;
 }
 

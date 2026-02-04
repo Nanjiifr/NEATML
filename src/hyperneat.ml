@@ -73,7 +73,8 @@ let create_substrate_network cppn_genome config =
       else if sn.layer = 2 then Output
       else Hidden
     in
-    { id = sn.node_id; kind }
+    let activation = if kind = Sensor then Identity else Tanh in
+    { id = sn.node_id; kind; activation }
   ) all_nodes in
   
   {

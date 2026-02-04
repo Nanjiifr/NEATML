@@ -1,5 +1,17 @@
 open Types
 
+let random_activation () =
+  match Random.int 9 with
+  | 0 -> Sigmoid
+  | 1 -> Tanh
+  | 2 -> Relu
+  | 3 -> Gaussian
+  | 4 -> Sin
+  | 5 -> Cos
+  | 6 -> Abs
+  | 7 -> Square
+  | _ -> Identity
+
 let mutate_weights g =
   let conn =
     List.map
@@ -13,7 +25,7 @@ let mutate_weights g =
             let new_weight =
               curr_weight +. (Random.float (2. *. power) -. power)
             in
-            let new_weight = max (-5.) (min 5. new_weight) in
+            let new_weight = max (-10.) (min 10. new_weight) in
             {
               in_node = c.in_node;
               out_node = c.out_node;
@@ -39,6 +51,26 @@ let mutate_weights g =
     fitness = g.fitness;
     adj_fitness = g.adj_fitness;
   }
+
+let mutate_activation g =
+  let nodes_array = Array.of_list g.nodes in
+  let len = Array.length nodes_array in
+  if len = 0 then g
+  else
+    let idx = Random.int len in
+    let node = nodes_array.(idx) in
+    (* Don't mutate activation of sensors/bias generally, but NEAT sometimes allows input nodes to transform *)
+    (* Typically we mutate Hidden and Output nodes *)
+    if node.kind = Sensor then g
+    else
+      let new_act = random_activation () in
+      let new_nodes =
+        List.map
+          (fun n ->
+            if n.id = node.id then { n with activation = new_act } else n)
+          g.nodes
+      in
+      { g with nodes = new_nodes }
 
 let mutate_topology g mod_type innov_global =
   let nodes_array = Array.of_list g.nodes in
@@ -80,7 +112,7 @@ let mutate_topology g mod_type innov_global =
       done;
 
       if !found then begin
-        let weight = Random.float 4. -. 2. in
+        let weight = Random.float 10. -. 5. in
         let innov_id =
           Innovation.get_innov_id innov_global nodes_array.(!best_start).id
             nodes_array.(!best_end).id Connexion
@@ -148,7 +180,9 @@ let mutate_topology g mod_type innov_global =
             innov = innov_id_out;
           }
         in
-        let new_node = { id = new_id; kind = Hidden } in
+        let new_node =
+          { id = new_id; kind = Hidden; activation = random_activation () }
+        in
 
         {
           connections = new_connections_list @ [ new_conn_in; new_conn_out ];
@@ -160,8 +194,10 @@ let mutate_topology g mod_type innov_global =
 let mutate g innov_global =
   let new_genome = mutate_weights g in
   let modified_gemome =
-    if Random.int 100 < 3 then mutate_topology new_genome Connexion innov_global
-    else if Random.int 100 < 1 then mutate_topology new_genome Node innov_global
+    let r = Random.int 100 in
+    if r < 5 then mutate_topology new_genome Connexion innov_global
+    else if r < 15 then mutate_topology new_genome Node innov_global
+    else if r < 10 then mutate_activation new_genome
     else new_genome
   in
   modified_gemome

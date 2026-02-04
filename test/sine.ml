@@ -1,15 +1,129 @@
 open Neatml
+open Types
 open Neural.Layers
 open Neural.Models
 open Neural.Training
 open Neural.Core
+open Graphics
 
 let create_dataset n =
   Array.init n (fun _ ->
-      let seed = Random.float (4. *. Float.pi) in
+      let seed = Random.float (2. *. Float.pi) in
       (seed, sin seed))
 
-let () =
+let main_neat () =
+  Random.self_init ();
+
+  let train_dataset =
+    let n = 100 in
+    Array.init n (fun i ->
+        let x = float i /. float (n - 1) *. (2. *. Float.pi) in
+        (x, sin x))
+  in
+
+  let evaluator g =
+    let nn = Phenotype.create_phenotype g in
+    let error = ref 0. in
+    Array.iter
+      (fun (x, sx) ->
+        let x_norm = x /. (2. *. Float.pi) in
+        Phenotype.reset_network nn;
+        let pred =
+          match Phenotype.predict nn [ x_norm ] with h :: _ -> h | [] -> 0.
+        in
+        error := !error +. ((sx -. pred) *. (sx -. pred)))
+      train_dataset;
+    let mse = !error /. float (Array.length train_dataset) in
+    4. -. mse
+  in
+  let input_size = 1 in
+  let output_size = 1 in
+
+  let pop_size = 300 in
+  let epochs = 100 in
+
+  let innov = Innovation.create (input_size + output_size + 5) in
+  let pop = ref (Evolution.create_pop pop_size input_size output_size innov) in
+  let species = ref [] in
+  let threshold = ref 3. in
+
+  let _start_time = Unix.gettimeofday () in
+  let total_evals = ref 0 in
+
+  let best_genome = ref (List.hd !pop.genomes) in
+
+  for epoch = 0 to epochs - 1 do
+    total_evals := !total_evals + pop_size;
+    let new_pop, new_species, evaluated_genomes =
+      Evolution.generation !pop !species evaluator innov threshold ()
+    in
+    pop := new_pop;
+    species := new_species;
+
+    (* Update best genome from the evaluated pool *)
+    List.iter
+      (fun g -> if g.fitness > !best_genome.fitness then best_genome := g)
+      evaluated_genomes;
+
+    Evolution.print_pop_summary !pop !species epoch epochs
+  done;
+
+  let nn = Phenotype.create_phenotype !best_genome in
+
+  open_graph " 800x600";
+  set_window_title "SINE Network: Reality vs Prediction";
+
+  let width = 800 in
+  let height = 600 in
+  let x_scale = float width /. (2. *. Float.pi) in
+  let y_scale = float height /. 2.5 in
+  let y_offset = height / 2 in
+
+  (* Draw axes *)
+  set_color (rgb 150 150 150);
+  moveto 0 y_offset;
+  lineto width y_offset;
+  moveto 0 0;
+  lineto 0 height;
+
+  (* Plot Real Sine (Blue) *)
+  set_color blue;
+  set_line_width 2;
+  for x_px = 0 to width - 1 do
+    let x = float x_px /. x_scale in
+    let y = sin x in
+    let y_px = int_of_float (y *. y_scale) + y_offset in
+    if x_px = 0 then moveto x_px y_px else lineto x_px y_px
+  done;
+
+  (* Plot Predicted Sine (Red) *)
+  set_color red;
+  set_line_width 2;
+  for x_px = 0 to width - 1 do
+    Phenotype.reset_network nn;
+    let x_real = float x_px /. x_scale in
+    let x_norm = x_real /. (2. *. Float.pi) in
+    let pred =
+      match Phenotype.predict nn [ x_norm ] with h :: _ -> h | [] -> 0.
+    in
+    let y_px = int_of_float (pred *. y_scale) + y_offset in
+
+    if x_px = 0 then moveto x_px y_px else lineto x_px y_px
+  done;
+
+  (* Legend *)
+  set_color blue;
+  moveto (width - 150) (height - 30);
+  draw_string "Reality (sin x)";
+  set_color red;
+  moveto (width - 150) (height - 50);
+  draw_string "Prediction";
+
+  Printf.printf "Press any key to close the window...\n";
+  ignore (wait_next_event [ Key_pressed ]);
+  close_graph ()
+
+let _main () =
   Random.self_init ();
 
   (* 1. Enable GPU at the very beginning *)
@@ -132,3 +246,5 @@ let () =
   Printf.printf "Press any key to close the window...\n";
   ignore (wait_next_event [ Key_pressed ]);
   close_graph ()
+
+let () = main_neat ()
