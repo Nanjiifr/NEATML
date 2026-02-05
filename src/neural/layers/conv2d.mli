@@ -1,8 +1,8 @@
 type t = {
-  kernels : Tensor.t array array;
-  mutable bias : float array;
-  mutable grad_weights : Tensor.t array array;
-  mutable grad_bias : float array;
+  mutable kernels : Tensor.t;
+  mutable bias : Tensor.t;
+  mutable grad_weights : Tensor.t;
+  mutable grad_bias : Tensor.t;
   mutable input_cache : Tensor.t option;
   activation : Activations.t;
   mutable preact_cache : Tensor.t option;
@@ -14,6 +14,6 @@ type t = {
 }
 
 val create : int -> int -> int -> int -> int -> Activations.t -> t
-val zero_grad : t -> unit
 val forward : t -> Tensor.t -> Tensor.t
+val zero_grad : t -> unit
 val backward : t -> Tensor.t -> Gradients.t

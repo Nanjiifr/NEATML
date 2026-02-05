@@ -16,7 +16,10 @@ kernel void matmul(
 {
     if (id.x >= uint(N) || id.y >= uint(M)) return;
     float sum = 0.0;
-    for (int k = 0; k < K; k++) sum += A[id.y * K + k] * B[k * N + id.x];
+    int a_row = id.y * K;
+    for (int k = 0; k < K; k++) {
+        sum += A[a_row + k] * B[k * N + id.x];
+    }
     C[id.y * N + id.x] = sum;
 }
 
@@ -36,6 +39,44 @@ kernel void sigmoid_fwd(device float *X [[buffer(0)]], constant uint &len [[buff
 kernel void tanh_fwd(device float *X [[buffer(0)]], constant uint &len [[buffer(1)]], uint id [[thread_position_in_grid]]) { 
     if (id >= len) return;
     X[id] = tanh(X[id]); 
+}
+
+kernel void relu_bwd(device const float *Z [[buffer(0)]], device const float *upstream [[buffer(1)]], device float *out [[buffer(2)]], constant uint &len [[buffer(3)]], uint id [[thread_position_in_grid]]) {
+    if (id >= len) return;
+    out[id] = Z[id] > 0 ? upstream[id] : 0.0;
+}
+
+kernel void sigmoid_bwd(device const float *Z [[buffer(0)]], device const float *upstream [[buffer(1)]], device float *out [[buffer(2)]], constant uint &len [[buffer(3)]], uint id [[thread_position_in_grid]]) {
+    if (id >= len) return;
+    float s = 1.0 / (1.0 + exp(-Z[id]));
+    out[id] = upstream[id] * s * (1.0 - s);
+}
+
+kernel void tanh_bwd(device const float *Z [[buffer(0)]], device const float *upstream [[buffer(1)]], device float *out [[buffer(2)]], constant uint &len [[buffer(3)]], uint id [[thread_position_in_grid]]) {
+    if (id >= len) return;
+    float t = tanh(Z[id]);
+    out[id] = upstream[id] * (1.0 - t * t);
+}
+
+kernel void conv2d_bias_bwd(
+    device const float *grad_out [[buffer(0)]],
+    device float *grad_b [[buffer(1)]],
+    constant int &N [[buffer(2)]],
+    constant int &OutH [[buffer(3)]],
+    constant int &OutW [[buffer(4)]],
+    constant int &out_depth [[buffer(5)]],
+    uint oc [[thread_position_in_grid]])
+{
+    if (oc >= uint(out_depth)) return;
+    float sum = 0.0;
+    int spatial_size = OutH * OutW;
+    for (int b = 0; b < N; b++) {
+        int base = b * out_depth * spatial_size + oc * spatial_size;
+        for (int i = 0; i < spatial_size; i++) {
+            sum += grad_out[base + i];
+        }
+    }
+    grad_b[oc] += sum / float(N);
 }
 
 kernel void linear_fwd(
@@ -165,6 +206,194 @@ kernel void cm_to_float(
     if (id >= len) return;
     cm_out[id] = float(atomic_load_explicit(&cm_in[id], memory_order_relaxed));
 }
+
+kernel void permute_nhwc_nchw(
+    device const float *in [[buffer(0)]],
+    device float *out [[buffer(1)]],
+    constant int *params [[buffer(2)]],
+    uint3 id [[thread_position_in_grid]])
+{
+    int N = params[0]; int H = params[1]; int W = params[2]; int C = params[3];
+    int w = id.x; int h = id.y; int bc = id.z;
+    if (w >= W || h >= H || bc >= N * C) return;
+    int c = bc % C; int b = bc / C;
+    int nchw_idx = b * (C * H * W) + c * (H * W) + h * W + w;
+    int nhwc_idx = b * (H * W * C) + h * (W * C) + w * C + c;
+    out[nchw_idx] = in[nhwc_idx];
+}
+
+kernel void permute_nchw_nhwc(
+    device const float *in [[buffer(0)]],
+    device float *out [[buffer(1)]],
+    constant int *params [[buffer(2)]],
+    uint3 id [[thread_position_in_grid]])
+{
+    int N = params[0]; int H = params[1]; int W = params[2]; int C = params[3];
+    int w = id.x; int h = id.y; int bc = id.z;
+    if (w >= W || h >= H || bc >= N * C) return;
+    int c = bc % C; int b = bc / C;
+    int nchw_idx = b * (C * H * W) + c * (H * W) + h * W + w;
+    int nhwc_idx = b * (H * W * C) + h * (W * C) + w * C + c;
+    out[nhwc_idx] = in[nchw_idx];
+}
+
+kernel void conv2d_direct_fwd(
+    device const float *input [[buffer(0)]],
+    device const float *weights [[buffer(1)]],
+    device const float *bias [[buffer(2)]],
+    device float *output [[buffer(3)]],
+    constant int *params [[buffer(4)]],
+    uint3 id [[thread_position_in_grid]])
+{
+    int N = params[0]; int InH = params[1]; int InW = params[2];
+    int OutH = params[3]; int OutW = params[4]; int KH = params[5]; int KW = params[6];
+    int InD = params[7]; int OutD = params[8]; int act = params[9]; 
+    
+    int w = id.x % OutW;
+    int h = id.x / OutW;
+    int oc = id.y;
+    int b = id.z;
+
+    if (w >= OutW || h >= OutH || oc >= OutD || b >= N) return;
+    
+    float sum = bias[oc];
+    int in_batch_offset = b * (InD * InH * InW);
+    int weight_oc_offset = oc * (InD * KH * KW);
+    
+    for (int ic = 0; ic < InD; ic++) {
+        int in_channel_offset = in_batch_offset + ic * (InH * InW);
+        int weight_ic_offset = weight_oc_offset + ic * (KH * KW);
+        for (int i = 0; i < KH; i++) {
+            for (int j = 0; j < KW; j++) {
+                sum += input[in_channel_offset + (h + i) * InW + (w + j)] * weights[weight_ic_offset + i * KW + j];
+            }
+        }
+    }
+    
+    if (act == 1) sum = max(0.0, sum); 
+    else if (act == 2) sum = tanh(sum); 
+    else if (act == 3) sum = 1.0/(1.0+exp(-sum));
+    
+    output[b * (OutD * OutH * OutW) + oc * (OutH * OutW) + h * OutW + w] = sum;
+}
+
+kernel void conv2d_direct_bwd_input(
+    device const float *grad_out [[buffer(0)]],
+    device const float *weights [[buffer(1)]],
+    device float *grad_in [[buffer(2)]],
+    constant int *params [[buffer(3)]],
+    uint3 id [[thread_position_in_grid]])
+{
+    int N = params[0]; int InH = params[1]; int InW = params[2];
+    int OutH = params[3]; int OutW = params[4]; int KH = params[5]; int KW = params[6];
+    int InD = params[7]; int OutD = params[8];
+    
+    int w = id.x % InW;
+    int h = id.x / InW;
+    int ic = id.y;
+    int b = id.z;
+
+    if (w >= InW || h >= InH || ic >= InD || b >= N) return;
+    
+    float sum = 0.0;
+    int grad_out_batch = b * (OutD * OutH * OutW);
+    for (int oc = 0; oc < OutD; oc++) {
+        int grad_out_ch = grad_out_batch + oc * (OutH * OutW);
+        int w_offset = oc * (InD * KH * KW) + ic * (KH * KW);
+        for (int i = 0; i < KH; i++) {
+            for (int j = 0; j < KW; j++) {
+                int out_y = h - i; int out_x = w - j;
+                if (out_y >= 0 && out_y < OutH && out_x >= 0 && out_x < OutW) {
+                    sum += grad_out[grad_out_ch + out_y * OutW + out_x] * weights[w_offset + i * KW + j];
+                }
+            }
+        }
+    }
+    grad_in[b * (InD * InH * InW) + ic * (InH * InW) + h * InW + w] = sum;
+}
+
+kernel void conv2d_direct_bwd_weights(
+    device const float *input [[buffer(0)]],
+    device const float *grad_out [[buffer(1)]],
+    device float *grad_w [[buffer(2)]],
+    constant int *params [[buffer(3)]],
+    uint3 id [[thread_position_in_grid]])
+{
+    int N = params[0]; int InH = params[1]; int InW = params[2];
+    int OutH = params[3]; int OutW = params[4]; int KH = params[5]; int KW = params[6];
+    int InD = params[7]; int OutD = params[8];
+    int k_idx = id.x; int ki = k_idx / KW; int kj = k_idx % KW; int ic = id.y; int oc = id.z;
+    if (ki >= KH || ic >= InD || oc >= OutD) return;
+    float sum = 0.0;
+    for (int b = 0; b < N; b++) {
+        int in_base = b * (InD * InH * InW) + ic * (InH * InW);
+        int grad_base = b * (OutD * OutH * OutW) + oc * (OutH * OutW);
+        for (int r = 0; r < OutH; r++) {
+            for (int c = 0; c < OutW; c++) {
+                sum += input[in_base + (r + ki) * InW + (c + kj)] * grad_out[grad_base + r * OutW + c];
+            }
+        }
+    }
+    grad_w[oc * (InD * KH * KW) + ic * (KH * KW) + k_idx] += sum / float(N);
+}
+
+kernel void im2col(
+    device const float *img [[buffer(0)]],
+    device float *cols [[buffer(1)]],
+    constant int *params [[buffer(2)]],
+    uint id [[thread_position_in_grid]])
+{
+    int N = params[0]; int C = params[1]; int H = params[2]; int W = params[3];
+    int OutH = params[4]; int OutW = params[5]; int KH = params[6]; int KW = params[7];
+    
+    int total = N * OutH * OutW * C * KH * KW;
+    if (id >= uint(total)) return;
+    
+    int kj = id % KW;
+    int ki = (id / KW) % KH;
+    int c = (id / (KW * KH)) % C;
+    int s = (id / (KW * KH * C)) % (OutH * OutW);
+    int b = id / (KW * KH * C * OutH * OutW);
+    
+    int out_y = s / OutW;
+    int out_x = s % OutW;
+    int in_y = out_y + ki;
+    int in_x = out_x + kj;
+    
+    cols[id] = img[b * (C * H * W) + c * (H * W) + in_y * W + in_x];
+}
+
+kernel void col2im_optimized(
+    device const float *cols [[buffer(0)]],
+    device float *img [[buffer(1)]],
+    constant int *params [[buffer(2)]],
+    uint id [[thread_position_in_grid]])
+{
+    int N = params[0]; int C = params[1]; int H = params[2]; int W = params[3];
+    int OutH = params[4]; int OutW = params[5]; int KH = params[6]; int KW = params[7];
+    
+    int total = N * C * H * W;
+    if (id >= uint(total)) return;
+    
+    int px = id % W;
+    int py = (id / W) % H;
+    int c = (id / (W * H)) % C;
+    int b = id / (W * H * C);
+    
+    float sum = 0.0;
+    int col_width = C * KH * KW;
+    for (int ki = 0; ki < KH; ki++) {
+        for (int kj = 0; kj < KW; kj++) {
+            int out_y = py - ki; int out_x = px - kj;
+            if (out_y >= 0 && out_y < OutH && out_x >= 0 && out_x < OutW) {
+                int s = out_y * OutW + out_x;
+                int col_idx = (((b * OutH * OutW + s) * C + c) * KH + ki) * KW + kj;
+                sum += cols[col_idx];
+            }
+        }
+    }
+    img[id] = sum;
+}
 |}
 
 type context = { 
@@ -185,9 +414,7 @@ let active_cb = ref None
 
 type tensor = { buffer : Buffer.t; rows : int; cols : int; mutable released : bool }
 
-(* Maximum commands before auto-commit to prevent memory buildup *)
 let max_commands_per_buffer = 100
-(* Maximum pool size for temporary buffers *)
 let max_pool_size = 50
 
 let flush_pending ctx =
@@ -223,7 +450,7 @@ let get_ctx () =
       let queue = CommandQueue.on_device device in
       let library = Library.on_device device ~source:shader_source (CompileOptions.init ()) in
       let pipelines = Hashtbl.create 16 in
-      let names = ["matmul";"mat_add";"relu_fwd";"sigmoid_fwd";"tanh_fwd";"linear_fwd";"linear_bwd_weights";"linear_bwd_input";"adam_step";"mse_grad";"mat_transpose";"add_bias";"zero_buf";"confusion_matrix_update";"cm_to_float"] in
+      let names = ["matmul";"mat_add";"relu_fwd";"sigmoid_fwd";"tanh_fwd";"linear_fwd";"linear_bwd_weights";"linear_bwd_input";"adam_step";"mse_grad";"mat_transpose";"add_bias";"zero_buf";"confusion_matrix_update";"cm_to_float";"relu_bwd";"sigmoid_bwd";"tanh_bwd";"conv2d_bias_bwd";"im2col";"col2im_optimized";"permute_nhwc_nchw";"permute_nchw_nhwc";"conv2d_direct_fwd";"conv2d_direct_bwd_input";"conv2d_direct_bwd_weights"] in
       List.iter (fun n -> Hashtbl.add pipelines n (let f = Library.new_function_with_name library n in fst (ComputePipelineState.on_device_with_function device f))) names;
       let ctx = { 
         device; 
@@ -248,8 +475,10 @@ let get_buffer ctx len =
 let release_buffer ctx (b : Buffer.t) =
   ctx.pending_buffers <- b :: ctx.pending_buffers
 
+let release (t : tensor) =
+  if not t.released then (t.released <- true; match !ctx_ref with Some ctx -> release_buffer ctx t.buffer | None -> ())
+
 let get_cb ctx = 
-  (* Auto-commit if buffer is getting too large *)
   if ctx.commands_in_buffer >= max_commands_per_buffer then begin
     match !active_cb with
     | Some cb -> 
@@ -267,8 +496,7 @@ let get_cb ctx =
       active_cb := Some cb; 
       cb
 
-let increment_command_count ctx =
-  ctx.commands_in_buffer <- ctx.commands_in_buffer + 1
+let increment_command_count ctx = ctx.commands_in_buffer <- ctx.commands_in_buffer + 1
 
 let commit_batch () = 
   match !active_cb with 
@@ -289,7 +517,7 @@ let of_cpu (t : float array array) =
     { buffer = b; rows = r; cols = c; released = false }
 
 let to_cpu (gt : tensor) =
-    sync (); (* Ensure GPU is done before reading *)
+    sync (); 
     let r, c = gt.rows, gt.cols in if r = 0 then [||] else
     let t = Array.make_matrix r c 0.0 in
     let p = Buffer.contents gt.buffer |> coerce (ptr void) (ptr float) in
@@ -318,11 +546,16 @@ let make_float_buf ctx v =
   (<-@) p v; 
   b
 
-let return_int_buf ctx b =
-  ctx.pending_ints <- b :: ctx.pending_ints
+let make_int_array_buf ctx arr =
+  let len = Array.length arr in
+  let b = Buffer.on_device ctx.device ~length:(len * 4) ResourceOptions.storage_mode_shared in
+  let p = Buffer.contents b |> coerce (ptr void) (ptr int) in
+  let ca = CArray.from_ptr p len in
+  Array.iteri (fun i v -> CArray.set ca i v) arr;
+  b
 
-let return_float_buf ctx b =
-  ctx.pending_floats <- b :: ctx.pending_floats
+let return_int_buf ctx b = ctx.pending_ints <- b :: ctx.pending_ints
+let return_float_buf ctx b = ctx.pending_floats <- b :: ctx.pending_floats
 
 let linear_fwd input weights bias batch out_dim in_dim act_type =
     let ctx = get_ctx () in 
@@ -333,22 +566,13 @@ let linear_fwd input weights bias batch out_dim in_dim act_type =
     ComputeCommandEncoder.set_buffer enc weights.buffer ~index:1; 
     ComputeCommandEncoder.set_buffer enc bias.buffer ~index:2; 
     ComputeCommandEncoder.set_buffer enc out_b ~index:3;
-    let buf_batch = make_int_buf ctx batch in
-    let buf_out_dim = make_int_buf ctx out_dim in
-    let buf_in_dim = make_int_buf ctx in_dim in
-    let buf_act_type = make_int_buf ctx act_type in
-    ComputeCommandEncoder.set_buffer enc buf_batch ~index:4; 
-    ComputeCommandEncoder.set_buffer enc buf_out_dim ~index:5; 
-    ComputeCommandEncoder.set_buffer enc buf_in_dim ~index:6; 
-    ComputeCommandEncoder.set_buffer enc buf_act_type ~index:7;
+    let b1 = make_int_buf ctx batch in let b2 = make_int_buf ctx out_dim in
+    let b3 = make_int_buf ctx in_dim in let b4 = make_int_buf ctx act_type in
+    ComputeCommandEncoder.set_buffer enc b1 ~index:4; ComputeCommandEncoder.set_buffer enc b2 ~index:5; 
+    ComputeCommandEncoder.set_buffer enc b3 ~index:6; ComputeCommandEncoder.set_buffer enc b4 ~index:7;
     ComputeCommandEncoder.dispatch_threadgroups enc ~threadgroups_per_grid:{width=(out_dim+31)/32; height=(batch+31)/32; depth=1} ~threads_per_threadgroup:{width=32; height=32; depth=1};
-    ComputeCommandEncoder.end_encoding enc; 
-    increment_command_count ctx;
-    (* Return buffers to pool after encoding *)
-    return_int_buf ctx buf_batch;
-    return_int_buf ctx buf_out_dim;
-    return_int_buf ctx buf_in_dim;
-    return_int_buf ctx buf_act_type;
+    ComputeCommandEncoder.end_encoding enc; increment_command_count ctx;
+    List.iter (return_int_buf ctx) [b1;b2;b3;b4];
     { buffer = out_b; rows = batch; cols = out_dim; released = false }
 
 let linear_bwd upstream in_cache weights out_cache grad_w grad_b batch out_dim in_dim act_type =
@@ -361,32 +585,21 @@ let linear_bwd upstream in_cache weights out_cache grad_w grad_b batch out_dim i
     ComputeCommandEncoder.set_buffer enc out_cache.buffer ~index:2; 
     ComputeCommandEncoder.set_buffer enc grad_w.buffer ~index:3; 
     ComputeCommandEncoder.set_buffer enc grad_b.buffer ~index:4;
-    let buf_batch = make_int_buf ctx batch in
-    let buf_out_dim = make_int_buf ctx out_dim in
-    let buf_in_dim = make_int_buf ctx in_dim in
-    let buf_act_type = make_int_buf ctx act_type in
-    ComputeCommandEncoder.set_buffer enc buf_batch ~index:5; 
-    ComputeCommandEncoder.set_buffer enc buf_out_dim ~index:6; 
-    ComputeCommandEncoder.set_buffer enc buf_in_dim ~index:7; 
-    ComputeCommandEncoder.set_buffer enc buf_act_type ~index:8;
+    let b1 = make_int_buf ctx batch in let b2 = make_int_buf ctx out_dim in
+    let b3 = make_int_buf ctx in_dim in let b4 = make_int_buf ctx act_type in
+    ComputeCommandEncoder.set_buffer enc b1 ~index:5; ComputeCommandEncoder.set_buffer enc b2 ~index:6; 
+    ComputeCommandEncoder.set_buffer enc b3 ~index:7; ComputeCommandEncoder.set_buffer enc b4 ~index:8;
     ComputeCommandEncoder.dispatch_threadgroups enc ~threadgroups_per_grid:{width=(in_dim+31)/32; height=(out_dim+31)/32; depth=1} ~threads_per_threadgroup:{width=32; height=32; depth=1};
     ComputeCommandEncoder.set_compute_pipeline_state enc (Hashtbl.find ctx.pipelines "linear_bwd_input");
     ComputeCommandEncoder.set_buffer enc upstream.buffer ~index:0; 
     ComputeCommandEncoder.set_buffer enc weights.buffer ~index:1; 
     ComputeCommandEncoder.set_buffer enc out_cache.buffer ~index:2; 
     ComputeCommandEncoder.set_buffer enc grad_in_b ~index:3;
-    ComputeCommandEncoder.set_buffer enc buf_batch ~index:4; 
-    ComputeCommandEncoder.set_buffer enc buf_out_dim ~index:5; 
-    ComputeCommandEncoder.set_buffer enc buf_in_dim ~index:6; 
-    ComputeCommandEncoder.set_buffer enc buf_act_type ~index:7;
+    ComputeCommandEncoder.set_buffer enc b1 ~index:4; ComputeCommandEncoder.set_buffer enc b2 ~index:5; 
+    ComputeCommandEncoder.set_buffer enc b3 ~index:6; ComputeCommandEncoder.set_buffer enc b4 ~index:7;
     ComputeCommandEncoder.dispatch_threadgroups enc ~threadgroups_per_grid:{width=(in_dim+31)/32; height=(batch+31)/32; depth=1} ~threads_per_threadgroup:{width=32; height=32; depth=1};
-    ComputeCommandEncoder.end_encoding enc; 
-    increment_command_count ctx;
-    (* Return buffers to pool after encoding *)
-    return_int_buf ctx buf_batch;
-    return_int_buf ctx buf_out_dim;
-    return_int_buf ctx buf_in_dim;
-    return_int_buf ctx buf_act_type;
+    ComputeCommandEncoder.end_encoding enc; increment_command_count ctx;
+    List.iter (return_int_buf ctx) [b1;b2;b3;b4];
     { buffer = grad_in_b; rows = batch; cols = in_dim; released = false }
 
 let adam_step w g m v lr b1 b2 b1p b2p eps wd =
@@ -398,33 +611,17 @@ let adam_step w g m v lr b1 b2 b1p b2p eps wd =
     ComputeCommandEncoder.set_buffer enc g.buffer ~index:1; 
     ComputeCommandEncoder.set_buffer enc m.buffer ~index:2; 
     ComputeCommandEncoder.set_buffer enc v.buffer ~index:3;
-    let buf_lr = make_float_buf ctx lr in
-    let buf_b1 = make_float_buf ctx b1 in
-    let buf_b2 = make_float_buf ctx b2 in
-    let buf_b1p = make_float_buf ctx b1p in
-    let buf_b2p = make_float_buf ctx b2p in
-    let buf_eps = make_float_buf ctx eps in
-    let buf_wd = make_float_buf ctx wd in
-    let buf_total = make_int_buf ctx total in
-    ComputeCommandEncoder.set_buffer enc buf_lr ~index:4; 
-    ComputeCommandEncoder.set_buffer enc buf_b1 ~index:5; 
-    ComputeCommandEncoder.set_buffer enc buf_b2 ~index:6; 
-    ComputeCommandEncoder.set_buffer enc buf_b1p ~index:7; 
-    ComputeCommandEncoder.set_buffer enc buf_b2p ~index:8; 
-    ComputeCommandEncoder.set_buffer enc buf_eps ~index:9; 
-    ComputeCommandEncoder.set_buffer enc buf_wd ~index:10;
-    ComputeCommandEncoder.set_buffer enc buf_total ~index:11;
+    let f1 = make_float_buf ctx lr in let f2 = make_float_buf ctx b1 in
+    let f3 = make_float_buf ctx b2 in let f4 = make_float_buf ctx b1p in
+    let f5 = make_float_buf ctx b2p in let f6 = make_float_buf ctx eps in
+    let f7 = make_float_buf ctx wd in let i1 = make_int_buf ctx total in
+    ComputeCommandEncoder.set_buffer enc f1 ~index:4; ComputeCommandEncoder.set_buffer enc f2 ~index:5; 
+    ComputeCommandEncoder.set_buffer enc f3 ~index:6; ComputeCommandEncoder.set_buffer enc f4 ~index:7; 
+    ComputeCommandEncoder.set_buffer enc f5 ~index:8; ComputeCommandEncoder.set_buffer enc f6 ~index:9; 
+    ComputeCommandEncoder.set_buffer enc f7 ~index:10; ComputeCommandEncoder.set_buffer enc i1 ~index:11;
     ComputeCommandEncoder.dispatch_threadgroups enc ~threadgroups_per_grid:{width=(total+1023)/1024; height=1; depth=1} ~threads_per_threadgroup:{width=1024; height=1; depth=1};
-    ComputeCommandEncoder.end_encoding enc;
-    increment_command_count ctx;
-    return_float_buf ctx buf_lr;
-    return_float_buf ctx buf_b1;
-    return_float_buf ctx buf_b2;
-    return_float_buf ctx buf_b1p;
-    return_float_buf ctx buf_b2p;
-    return_float_buf ctx buf_eps;
-    return_float_buf ctx buf_wd;
-    return_int_buf ctx buf_total
+    ComputeCommandEncoder.end_encoding enc; increment_command_count ctx;
+    List.iter (return_float_buf ctx) [f1;f2;f3;f4;f5;f6;f7]; return_int_buf ctx i1
 
 let mse_grad p t scale =
     let ctx = get_ctx () in 
@@ -435,23 +632,18 @@ let mse_grad p t scale =
     ComputeCommandEncoder.set_buffer enc p.buffer ~index:0; 
     ComputeCommandEncoder.set_buffer enc t.buffer ~index:1; 
     ComputeCommandEncoder.set_buffer enc res_b ~index:2;
-    let buf_scale = make_float_buf ctx scale in
-    let buf_total = make_int_buf ctx total in
-    ComputeCommandEncoder.set_buffer enc buf_scale ~index:3;
-    ComputeCommandEncoder.set_buffer enc buf_total ~index:4;
+    let f1 = make_float_buf ctx scale in let i1 = make_int_buf ctx total in
+    ComputeCommandEncoder.set_buffer enc f1 ~index:3; ComputeCommandEncoder.set_buffer enc i1 ~index:4;
     ComputeCommandEncoder.dispatch_threadgroups enc ~threadgroups_per_grid:{width=(total+1023)/1024; height=1; depth=1} ~threads_per_threadgroup:{width=1024; height=1; depth=1};
-    ComputeCommandEncoder.end_encoding enc; 
-    increment_command_count ctx;
-    return_float_buf ctx buf_scale;
-    return_int_buf ctx buf_total;
+    ComputeCommandEncoder.end_encoding enc; increment_command_count ctx;
+    return_float_buf ctx f1; return_int_buf ctx i1;
     { buffer = res_b; rows = p.rows; cols = p.cols; released = false }
 
 let copy_inplace src dst = 
     let ctx = get_ctx () in 
     let enc = BlitCommandEncoder.on_buffer (get_cb ctx) in 
     BlitCommandEncoder.copy_from_buffer enc ~source_buffer:src.buffer ~source_offset:0 ~destination_buffer:dst.buffer ~destination_offset:0 ~size:(src.rows*src.cols*4); 
-    BlitCommandEncoder.end_encoding enc;
-    increment_command_count ctx
+    BlitCommandEncoder.end_encoding enc; increment_command_count ctx
 
 let matmul a b =
     let ctx = get_ctx () in 
@@ -462,92 +654,73 @@ let matmul a b =
     ComputeCommandEncoder.set_buffer enc a.buffer ~index:0; 
     ComputeCommandEncoder.set_buffer enc b.buffer ~index:1; 
     ComputeCommandEncoder.set_buffer enc out_b ~index:2;
-    let buf_m = make_int_buf ctx m in
-    let buf_n = make_int_buf ctx n in
-    let buf_k = make_int_buf ctx k in
-    ComputeCommandEncoder.set_buffer enc buf_m ~index:3; 
-    ComputeCommandEncoder.set_buffer enc buf_n ~index:4; 
-    ComputeCommandEncoder.set_buffer enc buf_k ~index:5;
+    let b1 = make_int_buf ctx m in let b2 = make_int_buf ctx n in let b3 = make_int_buf ctx k in
+    ComputeCommandEncoder.set_buffer enc b1 ~index:3; ComputeCommandEncoder.set_buffer enc b2 ~index:4; 
+    ComputeCommandEncoder.set_buffer enc b3 ~index:5;
     ComputeCommandEncoder.dispatch_threadgroups enc ~threadgroups_per_grid:{width=(n+31)/32; height=(m+31)/32; depth=1} ~threads_per_threadgroup:{width=32; height=32; depth=1};
-    ComputeCommandEncoder.end_encoding enc; 
-    increment_command_count ctx;
-    return_int_buf ctx buf_m;
-    return_int_buf ctx buf_n;
-    return_int_buf ctx buf_k;
+    ComputeCommandEncoder.end_encoding enc; increment_command_count ctx;
+    List.iter (return_int_buf ctx) [b1;b2;b3];
     { buffer = out_b; rows = m; cols = n; released = false }
 
 let add a b =
     let ctx = get_ctx () in 
-    let m, n = a.rows, a.cols in 
-    let total = m * n in
+    let m, n = a.rows, a.cols in let total = m * n in
     let out_b = get_buffer ctx (total * 4) in
     let enc = ComputeCommandEncoder.on_buffer (get_cb ctx) in
     ComputeCommandEncoder.set_compute_pipeline_state enc (Hashtbl.find ctx.pipelines "mat_add");
     ComputeCommandEncoder.set_buffer enc a.buffer ~index:0; 
     ComputeCommandEncoder.set_buffer enc b.buffer ~index:1; 
     ComputeCommandEncoder.set_buffer enc out_b ~index:2;
-    let buf_total = make_int_buf ctx total in
-    ComputeCommandEncoder.set_buffer enc buf_total ~index:3;
+    let b1 = make_int_buf ctx total in
+    ComputeCommandEncoder.set_buffer enc b1 ~index:3;
     ComputeCommandEncoder.dispatch_threadgroups enc ~threadgroups_per_grid:{width=(total+1023)/1024; height=1; depth=1} ~threads_per_threadgroup:{width=1024; height=1; depth=1};
-    ComputeCommandEncoder.end_encoding enc; 
-    increment_command_count ctx;
-    return_int_buf ctx buf_total;
+    ComputeCommandEncoder.end_encoding enc; increment_command_count ctx;
+    return_int_buf ctx b1;
     { buffer = out_b; rows = m; cols = n; released = false }
 
 let relu x = 
-    let ctx = get_ctx () in 
-    let total = x.rows * x.cols in
+    let ctx = get_ctx () in let total = x.rows * x.cols in
     let enc = ComputeCommandEncoder.on_buffer (get_cb ctx) in 
     ComputeCommandEncoder.set_compute_pipeline_state enc (Hashtbl.find ctx.pipelines "relu_fwd"); 
     ComputeCommandEncoder.set_buffer enc x.buffer ~index:0; 
-    let buf_total = make_int_buf ctx total in
-    ComputeCommandEncoder.set_buffer enc buf_total ~index:1;
+    let b1 = make_int_buf ctx total in
+    ComputeCommandEncoder.set_buffer enc b1 ~index:1;
     ComputeCommandEncoder.dispatch_threadgroups enc ~threadgroups_per_grid:{width=(total+1023)/1024; height=1; depth=1} ~threads_per_threadgroup:{width=1024; height=1; depth=1}; 
-    ComputeCommandEncoder.end_encoding enc; 
-    increment_command_count ctx;
-    return_int_buf ctx buf_total;
-    x
+    ComputeCommandEncoder.end_encoding enc; increment_command_count ctx;
+    return_int_buf ctx b1; x
 
 let sigmoid x = 
-    let ctx = get_ctx () in 
-    let total = x.rows * x.cols in
+    let ctx = get_ctx () in let total = x.rows * x.cols in
     let enc = ComputeCommandEncoder.on_buffer (get_cb ctx) in 
     ComputeCommandEncoder.set_compute_pipeline_state enc (Hashtbl.find ctx.pipelines "sigmoid_fwd"); 
     ComputeCommandEncoder.set_buffer enc x.buffer ~index:0; 
-    let buf_total = make_int_buf ctx total in
-    ComputeCommandEncoder.set_buffer enc buf_total ~index:1;
+    let b1 = make_int_buf ctx total in
+    ComputeCommandEncoder.set_buffer enc b1 ~index:1;
     ComputeCommandEncoder.dispatch_threadgroups enc ~threadgroups_per_grid:{width=(total+1023)/1024; height=1; depth=1} ~threads_per_threadgroup:{width=1024; height=1; depth=1}; 
-    ComputeCommandEncoder.end_encoding enc; 
-    increment_command_count ctx;
-    return_int_buf ctx buf_total;
-    x
+    ComputeCommandEncoder.end_encoding enc; increment_command_count ctx;
+    return_int_buf ctx b1; x
 
 let tanh x = 
-    let ctx = get_ctx () in 
-    let total = x.rows * x.cols in
+    let ctx = get_ctx () in let total = x.rows * x.cols in
     let enc = ComputeCommandEncoder.on_buffer (get_cb ctx) in 
     ComputeCommandEncoder.set_compute_pipeline_state enc (Hashtbl.find ctx.pipelines "tanh_fwd"); 
     ComputeCommandEncoder.set_buffer enc x.buffer ~index:0; 
-    let buf_total = make_int_buf ctx total in
-    ComputeCommandEncoder.set_buffer enc buf_total ~index:1;
+    let b1 = make_int_buf ctx total in
+    ComputeCommandEncoder.set_buffer enc b1 ~index:1;
     ComputeCommandEncoder.dispatch_threadgroups enc ~threadgroups_per_grid:{width=(total+1023)/1024; height=1; depth=1} ~threads_per_threadgroup:{width=1024; height=1; depth=1}; 
-    ComputeCommandEncoder.end_encoding enc; 
-    increment_command_count ctx;
-    return_int_buf ctx buf_total;
-    x
+    ComputeCommandEncoder.end_encoding enc; increment_command_count ctx;
+    return_int_buf ctx b1; x
 
 let zero_tensor x =
-    let ctx = get_ctx () in 
-    let total = x.rows * x.cols in
+    let ctx = get_ctx () in let total = x.rows * x.cols in
     let enc = ComputeCommandEncoder.on_buffer (get_cb ctx) in 
     ComputeCommandEncoder.set_compute_pipeline_state enc (Hashtbl.find ctx.pipelines "zero_buf"); 
     ComputeCommandEncoder.set_buffer enc x.buffer ~index:0; 
-    let buf_total = make_int_buf ctx total in
-    ComputeCommandEncoder.set_buffer enc buf_total ~index:1;
+    let b1 = make_int_buf ctx total in
+    ComputeCommandEncoder.set_buffer enc b1 ~index:1;
     ComputeCommandEncoder.dispatch_threadgroups enc ~threadgroups_per_grid:{width=(total+1023)/1024; height=1; depth=1} ~threads_per_threadgroup:{width=1024; height=1; depth=1}; 
-    ComputeCommandEncoder.end_encoding enc; 
-    increment_command_count ctx;
-    return_int_buf ctx buf_total
+    ComputeCommandEncoder.end_encoding enc; increment_command_count ctx;
+    return_int_buf ctx b1
 
 let transpose a =
     let ctx = get_ctx () in 
@@ -556,15 +729,11 @@ let transpose a =
     ComputeCommandEncoder.set_compute_pipeline_state enc (Hashtbl.find ctx.pipelines "mat_transpose");
     ComputeCommandEncoder.set_buffer enc a.buffer ~index:0; 
     ComputeCommandEncoder.set_buffer enc out_b ~index:1;
-    let buf_rows = make_int_buf ctx a.rows in
-    let buf_cols = make_int_buf ctx a.cols in
-    ComputeCommandEncoder.set_buffer enc buf_rows ~index:2; 
-    ComputeCommandEncoder.set_buffer enc buf_cols ~index:3;
+    let b1 = make_int_buf ctx a.rows in let b2 = make_int_buf ctx a.cols in
+    ComputeCommandEncoder.set_buffer enc b1 ~index:2; ComputeCommandEncoder.set_buffer enc b2 ~index:3;
     ComputeCommandEncoder.dispatch_threadgroups enc ~threadgroups_per_grid:{width=(a.cols+31)/32; height=(a.rows+31)/32; depth=1} ~threads_per_threadgroup:{width=32; height=32; depth=1};
-    ComputeCommandEncoder.end_encoding enc; 
-    increment_command_count ctx;
-    return_int_buf ctx buf_rows;
-    return_int_buf ctx buf_cols;
+    ComputeCommandEncoder.end_encoding enc; increment_command_count ctx;
+    List.iter (return_int_buf ctx) [b1;b2];
     { buffer = out_b; rows = a.cols; cols = a.rows; released = false }
 
 let add_bias x bias =
@@ -573,76 +742,179 @@ let add_bias x bias =
     ComputeCommandEncoder.set_compute_pipeline_state enc (Hashtbl.find ctx.pipelines "add_bias");
     ComputeCommandEncoder.set_buffer enc x.buffer ~index:0; 
     ComputeCommandEncoder.set_buffer enc bias.buffer ~index:1;
-    let buf_cols = make_int_buf ctx x.cols in
-    ComputeCommandEncoder.set_buffer enc buf_cols ~index:2;
+    let b1 = make_int_buf ctx x.cols in
+    ComputeCommandEncoder.set_buffer enc b1 ~index:2;
     ComputeCommandEncoder.dispatch_threadgroups enc ~threadgroups_per_grid:{width=(x.cols+31)/32; height=(x.rows+31)/32; depth=1} ~threads_per_threadgroup:{width=32; height=32; depth=1};
-    ComputeCommandEncoder.end_encoding enc; 
-    increment_command_count ctx;
-    return_int_buf ctx buf_cols;
-    x
+    ComputeCommandEncoder.end_encoding enc; increment_command_count ctx;
+    return_int_buf ctx b1; x
 
-let conv2d _ _ _ = failwith "Use fused kernels"
+let activation_bwd act_name z upstream =
+    let ctx = get_ctx () in let total = z.rows * z.cols in
+    let out_b = get_buffer ctx (total * 4) in
+    let enc = ComputeCommandEncoder.on_buffer (get_cb ctx) in
+    let pipe_name = match act_name with "relu" -> "relu_bwd" | "sigmoid" -> "sigmoid_bwd" | "tanh" -> "tanh_bwd" | _ -> failwith ("Unsupported activation for GPU bwd: " ^ act_name) in
+    ComputeCommandEncoder.set_compute_pipeline_state enc (Hashtbl.find ctx.pipelines pipe_name);
+    ComputeCommandEncoder.set_buffer enc z.buffer ~index:0;
+    ComputeCommandEncoder.set_buffer enc upstream.buffer ~index:1;
+    ComputeCommandEncoder.set_buffer enc out_b ~index:2;
+    let b1 = make_int_buf ctx total in ComputeCommandEncoder.set_buffer enc b1 ~index:3;
+    ComputeCommandEncoder.dispatch_threadgroups enc ~threadgroups_per_grid:{width=(total+1023)/1024; height=1; depth=1} ~threads_per_threadgroup:{width=1024; height=1; depth=1};
+    ComputeCommandEncoder.end_encoding enc; increment_command_count ctx;
+    return_int_buf ctx b1;
+    { buffer = out_b; rows = z.rows; cols = z.cols; released = false }
+
+let conv2d_bias_bwd grad_out grad_b n out_h out_w out_depth =
+    let ctx = get_ctx () in
+    let enc = ComputeCommandEncoder.on_buffer (get_cb ctx) in
+    ComputeCommandEncoder.set_compute_pipeline_state enc (Hashtbl.find ctx.pipelines "conv2d_bias_bwd");
+    ComputeCommandEncoder.set_buffer enc grad_out.buffer ~index:0;
+    ComputeCommandEncoder.set_buffer enc grad_b.buffer ~index:1;
+    let b1 = make_int_buf ctx n in let b2 = make_int_buf ctx out_h in let b3 = make_int_buf ctx out_w in
+    let b4 = make_int_buf ctx out_depth in
+    ComputeCommandEncoder.set_buffer enc b1 ~index:2; ComputeCommandEncoder.set_buffer enc b2 ~index:3;
+    ComputeCommandEncoder.set_buffer enc b3 ~index:4; ComputeCommandEncoder.set_buffer enc b4 ~index:5;
+    ComputeCommandEncoder.dispatch_threadgroups enc ~threadgroups_per_grid:{width=(out_depth+63)/64; height=1; depth=1} ~threads_per_threadgroup:{width=64; height=1; depth=1};
+    ComputeCommandEncoder.end_encoding enc; increment_command_count ctx;
+    List.iter (return_int_buf ctx) [b1;b2;b3;b4]
+
+let im2col img cols n c h w out_h out_w kh kw =
+    let ctx = get_ctx () in
+    let enc = ComputeCommandEncoder.on_buffer (get_cb ctx) in
+    ComputeCommandEncoder.set_compute_pipeline_state enc (Hashtbl.find ctx.pipelines "im2col");
+    ComputeCommandEncoder.set_buffer enc img.buffer ~index:0;
+    ComputeCommandEncoder.set_buffer enc cols.buffer ~index:1;
+    let b_params = make_int_array_buf ctx [|n; c; h; w; out_h; out_w; kh; kw|] in
+    ComputeCommandEncoder.set_buffer enc b_params ~index:2;
+    let total = n * out_h * out_w * c * kh * kw in
+    ComputeCommandEncoder.dispatch_threadgroups enc ~threadgroups_per_grid:{width=(total+1023)/1024; height=1; depth=1} ~threads_per_threadgroup:{width=1024; height=1; depth=1};
+    ComputeCommandEncoder.end_encoding enc; increment_command_count ctx; ()
+
+let col2im cols img n c h w out_h out_w kh kw =
+    let ctx = get_ctx () in
+    let enc = ComputeCommandEncoder.on_buffer (get_cb ctx) in
+    ComputeCommandEncoder.set_compute_pipeline_state enc (Hashtbl.find ctx.pipelines "col2im_optimized");
+    ComputeCommandEncoder.set_buffer enc cols.buffer ~index:0;
+    ComputeCommandEncoder.set_buffer enc img.buffer ~index:1;
+    let b_params = make_int_array_buf ctx [|n; c; h; w; out_h; out_w; kh; kw|] in
+    ComputeCommandEncoder.set_buffer enc b_params ~index:2;
+    let total = n * c * h * w in
+    ComputeCommandEncoder.dispatch_threadgroups enc ~threadgroups_per_grid:{width=(total+1023)/1024; height=1; depth=1} ~threads_per_threadgroup:{width=1024; height=1; depth=1};
+    ComputeCommandEncoder.end_encoding enc; increment_command_count ctx; ()
+
+let permute_nhwc_nchw input output n h w c =
+    let ctx = get_ctx () in
+    let enc = ComputeCommandEncoder.on_buffer (get_cb ctx) in
+    ComputeCommandEncoder.set_compute_pipeline_state enc (Hashtbl.find ctx.pipelines "permute_nhwc_nchw");
+    ComputeCommandEncoder.set_buffer enc input.buffer ~index:0;
+    ComputeCommandEncoder.set_buffer enc output.buffer ~index:1;
+    let b_params = make_int_array_buf ctx [|n; h; w; c|] in
+    ComputeCommandEncoder.set_buffer enc b_params ~index:2;
+    ComputeCommandEncoder.dispatch_threadgroups enc ~threadgroups_per_grid:{width=(w+7)/8; height=(h+7)/8; depth=(n*c+7)/8} ~threads_per_threadgroup:{width=8; height=8; depth=8};
+    ComputeCommandEncoder.end_encoding enc; increment_command_count ctx; ()
+
+let permute_nchw_nhwc input output n h w c =
+    let ctx = get_ctx () in
+    let enc = ComputeCommandEncoder.on_buffer (get_cb ctx) in
+    ComputeCommandEncoder.set_compute_pipeline_state enc (Hashtbl.find ctx.pipelines "permute_nchw_nhwc");
+    ComputeCommandEncoder.set_buffer enc input.buffer ~index:0;
+    ComputeCommandEncoder.set_buffer enc output.buffer ~index:1;
+    let b_params = make_int_array_buf ctx [|n; h; w; c|] in
+    ComputeCommandEncoder.set_buffer enc b_params ~index:2;
+    ComputeCommandEncoder.dispatch_threadgroups enc ~threadgroups_per_grid:{width=(w+7)/8; height=(h+7)/8; depth=(n*c+7)/8} ~threads_per_threadgroup:{width=8; height=8; depth=8};
+    ComputeCommandEncoder.end_encoding enc; increment_command_count ctx; ()
+
+let conv2d_direct_fwd input weights bias output n in_h in_w out_h out_w kh kw in_d out_d _act =
+    let ctx = get_ctx () in
+    let col_len = n * out_h * out_w * in_d * kh * kw in
+    let cols = get_buffer ctx (col_len * 4) in
+    let cols_t = {buffer=cols; rows=n*out_h*out_w; cols=in_d*kh*kw; released=false} in
+    im2col input cols_t n in_d in_h in_w out_h out_w kh kw;
+    
+    let w_t = transpose {buffer=weights.buffer; rows=out_d; cols=in_d*kh*kw; released=false} in
+    let res = matmul cols_t w_t in
+    
+    let out_nhwc = {buffer=res.buffer; rows=n; cols=out_h*out_w*out_d; released=false} in
+    permute_nhwc_nchw out_nhwc output n out_h out_w out_d;
+    
+    let enc = ComputeCommandEncoder.on_buffer (get_cb ctx) in
+    ComputeCommandEncoder.set_compute_pipeline_state enc (Hashtbl.find ctx.pipelines "add_bias");
+    ComputeCommandEncoder.set_buffer enc output.buffer ~index:0;
+    ComputeCommandEncoder.set_buffer enc bias.buffer ~index:1;
+    let b1 = make_int_buf ctx out_d in
+    ComputeCommandEncoder.set_buffer enc b1 ~index:2;
+    ComputeCommandEncoder.dispatch_threadgroups enc ~threadgroups_per_grid:{width=(out_h*out_w+31)/32; height=n*out_d; depth=1} ~threads_per_threadgroup:{width=32; height=1; depth=1};
+    ComputeCommandEncoder.end_encoding enc; increment_command_count ctx;
+    
+    return_int_buf ctx b1;
+    release w_t; release res; release cols_t
+
+let conv2d_direct_bwd_weights input grad_out grad_w n in_h in_w out_h out_w kh kw in_d out_d =
+    let ctx = get_ctx () in
+    let col_len = n * out_h * out_w * in_d * kh * kw in
+    let cols = get_buffer ctx (col_len * 4) in
+    let cols_t = {buffer=cols; rows=n*out_h*out_w; cols=in_d*kh*kw; released=false} in
+    im2col input cols_t n in_d in_h in_w out_h out_w kh kw;
+    
+    let dz_nhwc_b = get_buffer ctx (n * out_h * out_w * out_d * 4) in
+    let dz_nhwc = {buffer=dz_nhwc_b; rows=n*out_h*out_w; cols=out_d; released=false} in
+    permute_nchw_nhwc grad_out dz_nhwc n out_h out_w out_d;
+    
+    let dz_t = transpose dz_nhwc in
+    let gw_mat = matmul dz_t cols_t in
+    
+    let total = out_d * in_d * kh * kw in
+    let enc = ComputeCommandEncoder.on_buffer (get_cb ctx) in
+    ComputeCommandEncoder.set_compute_pipeline_state enc (Hashtbl.find ctx.pipelines "mat_add");
+    ComputeCommandEncoder.set_buffer enc grad_w.buffer ~index:0;
+    ComputeCommandEncoder.set_buffer enc gw_mat.buffer ~index:1;
+    ComputeCommandEncoder.set_buffer enc grad_w.buffer ~index:2;
+    let b1 = make_int_buf ctx total in
+    ComputeCommandEncoder.set_buffer enc b1 ~index:3;
+    ComputeCommandEncoder.dispatch_threadgroups enc ~threadgroups_per_grid:{width=(total+1023)/1024; height=1; depth=1} ~threads_per_threadgroup:{width=1024; height=1; depth=1};
+    ComputeCommandEncoder.end_encoding enc; increment_command_count ctx;
+    
+    return_int_buf ctx b1;
+    release dz_t; release dz_nhwc; release gw_mat; release cols_t
+
+let conv2d_direct_bwd_input grad_out weights grad_in n in_h in_w out_h out_w kh kw in_d out_d =
+    let ctx = get_ctx () in
+    let dz_nhwc_b = get_buffer ctx (n * out_h * out_w * out_d * 4) in
+    let dz_nhwc = {buffer=dz_nhwc_b; rows=n*out_h*out_w; cols=out_d; released=false} in
+    permute_nchw_nhwc grad_out dz_nhwc n out_h out_w out_d;
+    
+    let d_cols = matmul dz_nhwc {buffer=weights.buffer; rows=out_d; cols=in_d*kh*kw; released=false} in
+    
+    col2im d_cols grad_in n in_d in_h in_w out_h out_w kh kw;
+    
+    release dz_nhwc; release d_cols
 
 let update_confusion_matrix preds targets cm =
     let ctx = get_ctx () in
-    let n = preds.rows in
-    let c = preds.cols in
-    (* Validate dimensions *)
+    let n = preds.rows in let c = preds.cols in
     if targets.rows <> n || targets.cols <> c then failwith "Gpu.update_confusion_matrix: Dimension mismatch";
     if cm.rows <> c || cm.cols <> c then failwith "Gpu.update_confusion_matrix: CM dimension mismatch";
-    
     let enc = ComputeCommandEncoder.on_buffer (get_cb ctx) in
     ComputeCommandEncoder.set_compute_pipeline_state enc (Hashtbl.find ctx.pipelines "confusion_matrix_update");
     ComputeCommandEncoder.set_buffer enc preds.buffer ~index:0;
     ComputeCommandEncoder.set_buffer enc targets.buffer ~index:1;
     ComputeCommandEncoder.set_buffer enc cm.buffer ~index:2;
-    let buf_n = make_int_buf ctx n in
-    let buf_c = make_int_buf ctx c in
-    ComputeCommandEncoder.set_buffer enc buf_n ~index:3;
-    ComputeCommandEncoder.set_buffer enc buf_c ~index:4;
-    ComputeCommandEncoder.dispatch_threadgroups enc 
-        ~threadgroups_per_grid:{width=(n+1023)/1024; height=1; depth=1} 
-        ~threads_per_threadgroup:{width=1024; height=1; depth=1};
-    ComputeCommandEncoder.end_encoding enc;
-    increment_command_count ctx;
-    return_int_buf ctx buf_n;
-    return_int_buf ctx buf_c
+    let b1 = make_int_buf ctx n in let b2 = make_int_buf ctx c in
+    ComputeCommandEncoder.set_buffer enc b1 ~index:3; ComputeCommandEncoder.set_buffer enc b2 ~index:4;
+    ComputeCommandEncoder.dispatch_threadgroups enc ~threadgroups_per_grid:{width=(n+1023)/1024; height=1; depth=1} ~threads_per_threadgroup:{width=1024; height=1; depth=1};
+    ComputeCommandEncoder.end_encoding enc; increment_command_count ctx;
+    return_int_buf ctx b1; return_int_buf ctx b2
 
 let cm_to_float_tensor cm =
-    let ctx = get_ctx () in
-    let len = cm.rows * cm.cols in
+    let ctx = get_ctx () in let len = cm.rows * cm.cols in
     let out_b = get_buffer ctx (len * 4) in
     let enc = ComputeCommandEncoder.on_buffer (get_cb ctx) in
     ComputeCommandEncoder.set_compute_pipeline_state enc (Hashtbl.find ctx.pipelines "cm_to_float");
     ComputeCommandEncoder.set_buffer enc cm.buffer ~index:0;
     ComputeCommandEncoder.set_buffer enc out_b ~index:1;
-    let buf_len = make_int_buf ctx len in
-    ComputeCommandEncoder.set_buffer enc buf_len ~index:2;
-    ComputeCommandEncoder.dispatch_threadgroups enc
-        ~threadgroups_per_grid:{width=(len+1023)/1024; height=1; depth=1}
-        ~threads_per_threadgroup:{width=1024; height=1; depth=1};
-    ComputeCommandEncoder.end_encoding enc;
-    increment_command_count ctx;
-    return_int_buf ctx buf_len;
-    { buffer = out_b; rows = cm.rows; cols = cm.cols; released = false }
+    let b1 = make_int_buf ctx len in ComputeCommandEncoder.set_buffer enc b1 ~index:2;
+    ComputeCommandEncoder.dispatch_threadgroups enc ~threadgroups_per_grid:{width=(len+1023)/1024; height=1; depth=1} ~threads_per_threadgroup:{width=1024; height=1; depth=1};
+    ComputeCommandEncoder.end_encoding enc; increment_command_count ctx;
+    return_int_buf ctx b1; { buffer = out_b; rows = cm.rows; cols = cm.cols; released = false }
 
-let release (t : tensor) =
-  if not t.released then begin
-    t.released <- true;
-    match !ctx_ref with
-    | Some ctx -> release_buffer ctx t.buffer
-    | None -> ()
-  end
-
-(* Cleanup function to release all resources and clear buffer pools *)
 let cleanup () =
-  (* Sync any pending commands *)
-  sync ();
-  (* Clear buffer pools *)
-  match !ctx_ref with
-  | Some ctx ->
-      Queue.clear ctx.int_buffer_pool;
-      Queue.clear ctx.float_buffer_pool;
-      Hashtbl.clear ctx.buffer_cache;
-      ctx.commands_in_buffer <- 0
-  | None -> ()
+  sync (); match !ctx_ref with Some ctx -> Queue.clear ctx.int_buffer_pool; Queue.clear ctx.float_buffer_pool; Hashtbl.clear ctx.buffer_cache; ctx.commands_in_buffer <- 0 | None -> ()

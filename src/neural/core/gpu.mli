@@ -21,7 +21,18 @@ val add : tensor -> tensor -> tensor
 val relu : tensor -> tensor
 val sigmoid : tensor -> tensor
 val tanh : tensor -> tensor
-val conv2d : string -> tensor -> tensor -> tensor
+
+val conv2d_bias_bwd : tensor -> tensor -> int -> int -> int -> int -> unit
+val activation_bwd : string -> tensor -> tensor -> tensor
+val im2col : tensor -> tensor -> int -> int -> int -> int -> int -> int -> int -> int -> unit
+val col2im : tensor -> tensor -> int -> int -> int -> int -> int -> int -> int -> int -> unit
+val permute_nhwc_nchw : tensor -> tensor -> int -> int -> int -> int -> unit
+val permute_nchw_nhwc : tensor -> tensor -> int -> int -> int -> int -> unit
+
+val conv2d_direct_fwd : tensor -> tensor -> tensor -> tensor -> int -> int -> int -> int -> int -> int -> int -> int -> int -> int -> unit
+val conv2d_direct_bwd_input : tensor -> tensor -> tensor -> int -> int -> int -> int -> int -> int -> int -> int -> int -> unit
+val conv2d_direct_bwd_weights : tensor -> tensor -> tensor -> int -> int -> int -> int -> int -> int -> int -> int -> int -> unit
+
 val add_bias : tensor -> tensor -> tensor
 val transpose : tensor -> tensor
 

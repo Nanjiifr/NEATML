@@ -22,41 +22,66 @@ let create ?(beta1 = 0.9) ?(beta2 = 0.999) ?(eps = 1e-3) ?(weight_decay = 0.01)
     lr _ (seq : Sequential.t) =
   List.map
     (fun layer ->
-      let out_dim =
-        match layer with Layer.Linear l -> Utils.rows l.weights | _ -> 0
-      in
-      let in_dim =
-        match layer with Layer.Linear l -> Utils.cols l.weights | _ -> 0
-      in
-      let m_t_bias =
-        let t = Utils.zeros 1 out_dim in
-        if !Utils.use_gpu then Utils.to_gpu t else t
-      in
-      let v_t_bias =
-        let t = Utils.zeros 1 out_dim in
-        if !Utils.use_gpu then Utils.to_gpu t else t
-      in
-      Adam
-        {
-          count = 0;
-          m_t_weights =
-            DenseM
-              (let t = Utils.zeros out_dim in_dim in
-               if !Utils.use_gpu then Utils.to_gpu t else t);
-          v_t_weights =
-            DenseM
-              (let t = Utils.zeros out_dim in_dim in
-               if !Utils.use_gpu then Utils.to_gpu t else t);
-          m_t_bias;
-          v_t_bias;
-          beta1;
-          beta2;
-          beta1_pow = 1.;
-          beta2_pow = 1.;
-          lr;
-          weight_decay;
-          eps;
-        })
+          let out_dim = match layer with Layer.Linear l -> Utils.rows l.weights | Layer.Conv2d c -> c.output_depth in
+          let in_dim = match layer with Layer.Linear l -> Utils.cols l.weights | Layer.Conv2d c -> c.input_depth in
+          
+              (* Moments for weights *)
+          
+              let m_w, v_w = match layer with
+          
+              | Layer.Linear _ -> 
+          
+                  let t1 = Utils.zeros out_dim in_dim in
+          
+                  let t2 = Utils.zeros out_dim in_dim in
+          
+                  let m = if !Utils.use_gpu then Utils.to_gpu t1 else t1 in
+          
+                  let v = if !Utils.use_gpu then Utils.to_gpu t2 else t2 in
+          
+                  DenseM m, DenseM v
+          
+                  | Layer.Conv2d c ->
+          
+                      let t1 = Utils.zeros 1 (c.output_depth * c.input_depth * c.kernel_size * c.kernel_size) in
+          
+                      let t2 = Utils.zeros 1 (c.output_depth * c.input_depth * c.kernel_size * c.kernel_size) in
+          
+                      let m = if !Utils.use_gpu then Utils.to_gpu t1 else t1 in
+          
+                      let v = if !Utils.use_gpu then Utils.to_gpu t2 else t2 in
+          
+                      DenseM m, DenseM v
+          
+                  in
+          
+              
+          
+          (* Moments for bias. Now both Linear and Conv2d use GPU if available *)
+          let m_b, v_b = 
+              let t = Utils.zeros 1 out_dim in
+              let tm = if !Utils.use_gpu then Utils.to_gpu t else t in
+              let tv = if !Utils.use_gpu then Utils.to_gpu t else t in
+              tm, tv
+          in
+      
+              Adam 
+      
+                {
+      
+                  count = 0;
+      
+                  m_t_weights = m_w;
+      
+                  v_t_weights = v_w;
+      
+                  m_t_bias = m_b; v_t_bias = v_b;
+      
+          
+              beta1; beta2; beta1_pow = 1.; beta2_pow = 1.;
+              lr; weight_decay; eps;
+            }
+      )
     seq.Sequential.layers
 
 let optimize_adam (layer : Layer.t) (grads : Gradients.t) (o : adam) =
@@ -75,11 +100,23 @@ let optimize_adam (layer : Layer.t) (grads : Gradients.t) (o : adam) =
               Gpu.adam_step pb gbb mb vb o.lr o.beta1 o.beta2 o.beta1_pow
                 o.beta2_pow o.eps o.weight_decay
           | _ -> ());
-          Linear.zero_grad l
-      | _ -> failwith "Optimizer: GPU enabled but tensors are CPU")
-  | _ -> failwith "Optimizer: Unsupported layer"
-
-let update seq grads opt =
+                     Linear.zero_grad l
+                 | _ -> failwith "Optimizer: GPU enabled but tensors are CPU")
+                | Layer.Conv2d l, Gradients.Dense gc, DenseM mw, DenseM vw ->
+                    (match l.kernels, gc, mw, vw with
+                     | Tensor.GPU pw, Tensor.GPU pg, Tensor.GPU pm, Tensor.GPU pv ->
+                         Gpu.adam_step pw pg pm pv o.lr o.beta1 o.beta2 o.beta1_pow o.beta2_pow o.eps o.weight_decay
+                     | _ -> failwith "Optimizer: Conv2d weights not on GPU");
+                    
+                    (match l.bias, grads.d_bias, o.m_t_bias, o.v_t_bias with
+                     | Tensor.GPU pb, Tensor.GPU gb, Tensor.GPU mb, Tensor.GPU vb ->
+                         Gpu.adam_step pb gb mb vb o.lr o.beta1 o.beta2 o.beta1_pow o.beta2_pow o.eps o.weight_decay
+                     | _ -> failwith "Optimizer: Conv2d bias not on GPU");
+                    
+                    Conv2d.zero_grad l
+            
+            | _ -> failwith "Optimizer: Unsupported layer"
+          let update seq grads opt =
   Utils.list_iter3
     (fun l g o -> match o with Adam a -> optimize_adam l g a | _ -> ())
     seq.Sequential.layers grads opt
@@ -121,10 +158,14 @@ let fit (model : Sequential.t) (xtrain : Tensor.t) (ytrain : Tensor.t)
   Printf.printf "\027[1;35m[Training Start]\027[0m Batches: %d | Samples: %d\n\n\n%!" n_batches n;
 
   let val_loss = ref 0.0 in
-  let last_epoch_loss = ref 0.0 in
+  let running_loss = ref 0.0 in
+  let loss_samples = ref 0 in
+  
+  (* Determine display refresh rate to avoid stalling pipeline with too many syncs *)
+  (* For fast CNNs, updating every 10-20 batches is good. *)
+  let refresh_rate = max 1 (n_batches / 20) in 
 
   for epoch = 1 to epochs do
-    let epoch_loss = ref 0.0 in
     for b = 0 to n_batches - 1 do
       let idx = b * batchsize in
       let b_in_cpu = Array.sub xt_cpu idx batchsize in
@@ -134,7 +175,14 @@ let fit (model : Sequential.t) (xtrain : Tensor.t) (ytrain : Tensor.t)
       
       let preds = Sequential.forward_seq model b_in in
       
-      if b = n_batches - 1 then epoch_loss := Errors.compute_error err b_tg preds;
+      (* Sample loss for display occasionally to avoid killing perf with sync() *)
+      if b mod refresh_rate = 0 || b = n_batches - 1 then (
+          let l = Errors.compute_error err b_tg preds in
+          running_loss := 0.9 *. !running_loss +. 0.1 *. l;
+          if !loss_samples = 0 then running_loss := l; (* Init *)
+          loss_samples := !loss_samples + 1;
+          print_status epoch epochs (b + 1) n_batches !running_loss !val_loss global_start
+      );
 
       let grads = Sequential.backward_seq model (Errors.grad_error err b_tg preds) in
       update model grads opt;
@@ -142,13 +190,9 @@ let fit (model : Sequential.t) (xtrain : Tensor.t) (ytrain : Tensor.t)
       (match (List.hd grads).Gradients.d_input with Tensor.GPU g -> Gpu.release g | _ -> ());
       (match b_tg with Tensor.GPU g -> Gpu.release g | _ -> ());
       (match b_in with Tensor.GPU g -> Gpu.release g | _ -> ());
-      if !Utils.use_gpu then Gpu.commit_batch ();
       
-      if b mod 2 = 0 || b = n_batches - 1 then
-        print_status epoch epochs (b + 1) n_batches !epoch_loss !val_loss global_start;
+      (* Removed forced commit_batch to let Gpu module batch commands naturally *)
     done;
-
-    last_epoch_loss := !epoch_loss;
 
     if !Utils.use_gpu then begin
       Gpu.sync ();
@@ -161,6 +205,6 @@ let fit (model : Sequential.t) (xtrain : Tensor.t) (ytrain : Tensor.t)
     (match val_preds with Tensor.GPU g -> Gpu.release g | _ -> ());
     
     (* Refresh status with final epoch data *)
-    print_status epoch epochs n_batches n_batches !last_epoch_loss !val_loss global_start;
+    print_status epoch epochs n_batches n_batches !running_loss !val_loss global_start;
   done;
   Printf.printf "\n\n\027[1;32m[Training Complete]\027[0m\n%!"

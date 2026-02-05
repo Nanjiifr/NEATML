@@ -76,7 +76,7 @@ let load_mnist_data () =
     to_tensor x_test_cpu,
     to_tensor y_test_cpu )
 
-let main () =
+let _main_mlp () =
   Random.self_init ();
 
   Utils.enable_gpu ();
@@ -110,4 +110,42 @@ let main () =
 
   Metrics.evaluate model x_train y_train x_test y_test batch_size
 
-let () = main ()
+let _main_cnn () =
+  Random.self_init ();
+
+  Utils.enable_gpu ();
+  Printf.printf
+    "\027[1;32m[SYSTEM]\027[0m GPU Acceleration Enabled: \027[1;33m%b\027[0m\n"
+    !Utils.use_gpu;
+
+  let x_train, y_train, x_test, y_test = load_mnist_data () in
+  let batch_size = 128 in
+
+  (* Architecture: Conv(1, 28, 28, 5, 8) -> Linear(8*24*24, 64) -> Linear(64, 10) *)
+  let conv1 = Conv2d.create 1 28 28 5 8 Activations.ReLU in
+  let out_h = 28 - 5 + 1 in
+  let out_w = 28 - 5 + 1 in
+  let conv_out_dim = 8 * out_h * out_w in
+
+  let hidden = Linear.create conv_out_dim 64 batch_size Activations.ReLU in
+  let output = Linear.create 64 10 batch_size Activations.Sigmoid in
+
+  let model =
+    {
+      Sequential.layers =
+        [ Layer.Conv2d conv1; Layer.Linear hidden; Layer.Linear output ];
+    }
+  in
+
+  Printf.printf "\n\027[1;34m[INFO]\027[0m Training CNN on MNIST...\n%!";
+  Metrics.evaluate model x_train y_train x_test y_test batch_size;
+
+  let lr = 0.001 in
+  let optimizer = Optimizer.create lr Optimizer.Adam model in
+
+  Optimizer.fit model x_train y_train x_test y_test batch_size 10 optimizer
+    Errors.CROSS_ENTROPY;
+
+  Metrics.evaluate model x_train y_train x_test y_test batch_size
+
+let () = _main_cnn ()

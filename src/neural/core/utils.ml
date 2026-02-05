@@ -176,10 +176,22 @@ let rec list_iter3 f a b c =
       list_iter3 f t1 t2 t3
   | _, _, _ -> failwith "Error: expected lists of same size"
 
-let conv mode t1 t2 =
+(* Helpers to force CPU or GPU if needed *)
+let to_cpu t = 
+  match t with
+  | CPU m -> m
+  | GPU g -> Gpu.to_cpu g
+
+let to_gpu t =
+  match t with
+  | CPU m -> GPU (Gpu.of_cpu m)
+  | GPU g -> GPU g
+
+let rec conv mode t1 t2 =
   match t1, t2 with
   | CPU m1, CPU m2 ->
-      if !use_gpu then GPU (Gpu.conv2d mode (Gpu.of_cpu m1) (Gpu.of_cpu m2))
+      (* GPU Conv is now specialized for layers. Fallback to CPU here for generic utility use. *)
+      if false (* !use_gpu - disabled generic GPU conv *) then failwith "Generic GPU conv deprecated"
       else (
          if mode <> "full" && mode <> "valid" then failwith "Utils : convolution method is unknown" ;
           let m1_height = Array.length m1 and m1_width = Array.length m1.(0) in
@@ -220,17 +232,10 @@ let conv mode t1 t2 =
             CPU r
           end
       )
-  | GPU g1, GPU g2 -> GPU (Gpu.conv2d mode g1 g2)
-  | CPU m, GPU g -> GPU (Gpu.conv2d mode (Gpu.of_cpu m) g)
-  | GPU g, CPU m -> GPU (Gpu.conv2d mode g (Gpu.of_cpu m))
-
-(* Helpers to force CPU or GPU if needed *)
-let to_cpu t = 
-  match t with
-  | CPU m -> m
-  | GPU g -> Gpu.to_cpu g
-
-let to_gpu t =
-  match t with
-  | CPU m -> GPU (Gpu.of_cpu m)
-  | GPU g -> GPU g
+  | GPU g1, GPU g2 -> 
+      (* Fallback to CPU *)
+      conv mode (CPU (to_cpu (GPU g1))) (CPU (to_cpu (GPU g2)))
+  | CPU m, GPU g -> 
+      conv mode (CPU m) (CPU (to_cpu (GPU g)))
+  | GPU g, CPU m -> 
+      conv mode (CPU (to_cpu (GPU g))) (CPU m)

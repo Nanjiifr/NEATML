@@ -62,9 +62,10 @@ let print_weights (net : t) =
       | Layer.Conv2d c ->
           Printf.printf "  Layer %d (Conv2d):\n" (i + 1);
           Printf.printf "  Kernels: [%d x %d x %d x %d]\n" c.output_depth c.input_depth c.kernel_size c.kernel_size;
+          let bias_cpu = Utils.to_cpu c.bias in
           Printf.printf "  Bias: [%s]\n"
             (String.concat "; "
-               (Array.to_list (Array.map (fun v -> Printf.sprintf "%.4f" v) c.bias)))
+               (Array.to_list (Array.map (fun v -> Printf.sprintf "%.4f" v) bias_cpu.(0))))
     )
     net.layers
 

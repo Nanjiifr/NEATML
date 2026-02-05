@@ -41,9 +41,22 @@ let activate (acti : t) (inputs : Tensor.t) =
       | ReLU -> Utils.map_mat (fun a _ _ -> relu a) inputs
       | Softmax -> softmax inputs)
 
+let derivative (acti : t) (z_tensor : Tensor.t) : Tensor.t =
+  match acti with
+  | Linear -> Utils.map_mat (fun _ _ _ -> 1.0) z_tensor
+  | ReLU -> Utils.map_mat (fun z _ _ -> if z > 0.0 then 1.0 else 0.0) z_tensor
+  | Tanh -> 
+      Utils.map_mat (fun z _ _ -> 
+          let t = tanh z in 
+          1.0 -. t *. t) z_tensor
+  | Sigmoid ->
+      Utils.map_mat (fun z _ _ -> 
+          let s = sigmoid z in 
+          s *. (1.0 -. s)) z_tensor
+  | Softmax -> failwith "Activations.derivative: Softmax requires full Jacobian"
+
 (* Derivatives are currently computed on CPU returning 3D array *)
 (* This is a bottleneck for GPU training. *)
-(* But we can't easily change the signature of derivative_pre without changing Linear.backward logic *)
 let derivative_pre (acti : t) (z_tensor : Tensor.t) : float array array array
     =
   let z = Utils.to_cpu z_tensor in
