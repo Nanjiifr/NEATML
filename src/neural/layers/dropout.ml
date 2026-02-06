@@ -31,11 +31,10 @@ let forward (l : t) (input : Tensor.t) =
         Tensor.CPU mask_cpu 
     in
     l.mask <- Some mask_t;
-    Utils.multiply_matrix_elementwise input mask_t
+    match input, mask_t with
+    | Tensor.GPU i, Tensor.GPU m -> Tensor.GPU (Gpu.mul i m)
+    | _ -> Utils.multiply_matrix_elementwise input mask_t
   ) else (
-    (* During inference, we don't drop anything. 
-       Since we used inverted dropout (scaling during train), 
-       we pass input as is. *)
     input
   )
 
@@ -44,11 +43,15 @@ let backward (l : t) (grad_output : Tensor.t) =
   let d_b = if !Utils.use_gpu then Utils.to_gpu dummy_bias else dummy_bias in
   match l.mask with
   | Some m -> 
-      let d_input = Utils.multiply_matrix_elementwise grad_output m in
+      let d_input = 
+        match grad_output, m with
+        | Tensor.GPU g, Tensor.GPU m_g -> Tensor.GPU (Gpu.mul g m_g)
+        | _ -> Utils.multiply_matrix_elementwise grad_output m
+      in
       { Gradients.d_input; d_weights = Gradients.Empty; d_bias = d_b }
   | None -> 
-      (* Should not happen if training, but if so, pass through *)
       { Gradients.d_input = grad_output; d_weights = Gradients.Empty; d_bias = d_b }
+
 
 let set_training_mode (l : t) (active : bool) =
   l.training <- active

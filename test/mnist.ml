@@ -177,7 +177,6 @@ let _main_mlp () =
   Sequential.summary model;
 
   Printf.printf "Evaluating initial state...\n%!";
-  Metrics.evaluate model x_train y_train x_test y_test batch_size;
 
   let lr = 0.001 in
   let optimizer = Optimizer.create lr Optimizer.Adam model in
@@ -203,11 +202,14 @@ let _main_cnn () =
   let x_train, y_train, x_test, y_test = load_mnist_data () in
   let batch_size = 128 in
 
-  (* Architecture: Conv(1, 28, 28, 5, 8) -> Linear(8*24*24, 64) -> Linear(64, 10) *)
+  (* Architecture: Conv(1, 28, 28, 5, 8) -> MaxPool(2, 2) -> Linear -> Linear *)
   let conv1 = Conv2d.create 1 28 28 5 8 Activations.ReLU in
   let out_h = 28 - 5 + 1 in
   let out_w = 28 - 5 + 1 in
-  let conv_out_dim = 8 * out_h * out_w in
+  
+  let pool = Pooling.create 2 2 8 out_h out_w in
+  let p_d, p_h, p_w = Pooling.get_output_dims pool in
+  let conv_out_dim = p_d * p_h * p_w in
 
   let hidden = Linear.create conv_out_dim 64 batch_size Activations.ReLU in
   let output = Linear.create 64 10 batch_size Activations.Sigmoid in
@@ -215,14 +217,19 @@ let _main_cnn () =
   let model =
     {
       Sequential.layers =
-        [ Layer.Conv2d conv1; Layer.Linear hidden; Layer.Linear output ];
+        [
+          Layer.Conv2d conv1;
+          Layer.MaxPool2d pool;
+          Layer.Dropout (Dropout.create 0.2);
+          Layer.Linear hidden;
+          Layer.Linear output;
+        ];
     }
   in
 
   Sequential.summary model;
 
   Printf.printf "\n\027[1;34m[INFO]\027[0m Training CNN on MNIST...\n%!";
-  Metrics.evaluate model x_train y_train x_test y_test batch_size;
 
   let lr = 0.001 in
   let optimizer = Optimizer.create lr Optimizer.Adam model in
@@ -242,4 +249,4 @@ let () =
   if Sys.file_exists lib_path then
     Py.initialize ~library_name:lib_path ~version:3 ()
   else Py.initialize ~version:3 ();
-  _main_mlp ()
+  _main_cnn ()

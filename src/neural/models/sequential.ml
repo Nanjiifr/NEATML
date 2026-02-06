@@ -123,9 +123,9 @@ let summary (model : t) =
     in
     aux len ""
   in
-  let line = "=================================================================" in
-  let thin_line = "_________________________________________________________________" in
-  Printf.printf "%-28s %-25s %-15s\n" "Layer (type)" "Output Shape" "Param #";
+  let line = "\027[1;30m=================================================================\027[0m" in
+  let thin_line = "\027[1;30m_________________________________________________________________\027[0m" in
+  Printf.printf "\027[1;36m%-28s %-25s %-15s\027[0m\n" "Layer (type)" "Output Shape" "Param #";
   Printf.printf "%s\n" line;
   
   let total_params = ref 0 in
@@ -170,14 +170,14 @@ let summary (model : t) =
           (n, s, 0)
     in
     total_params := !total_params + params;
-    Printf.printf "%-28s %-25s %-15s\n" name out_shape (format_int params);
+    Printf.printf "\027[1;37m%-28s %-25s\027[0m \027[1;32m%-15s\027[0m\n" name out_shape (format_int params);
     Printf.printf "%s\n" thin_line;
   ) model.layers;
   
   Printf.printf "%s\n" line;
-  Printf.printf "Total params: %s\n" (format_int !total_params);
-  Printf.printf "Trainable params: %s\n" (format_int !total_params);
-  Printf.printf "Non-trainable params: 0\n"
+  Printf.printf "\027[1;37mTotal params:\027[0m \027[1;32m%s\027[0m\n" (format_int !total_params);
+  Printf.printf "\027[1;37mTrainable params:\027[0m \027[1;32m%s\027[0m\n" (format_int !total_params);
+  Printf.printf "\027[1;37mNon-trainable params:\027[0m \027[1;32m0\027[0m\n"
 
 let set_training_mode (model : t) (active : bool) =
   List.iter (fun l -> Layer.set_training_mode l active) model.layers

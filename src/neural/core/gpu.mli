@@ -33,6 +33,10 @@ val conv2d_direct_fwd : tensor -> tensor -> tensor -> tensor -> int -> int -> in
 val conv2d_direct_bwd_input : tensor -> tensor -> tensor -> int -> int -> int -> int -> int -> int -> int -> int -> int -> unit
 val conv2d_direct_bwd_weights : tensor -> tensor -> tensor -> int -> int -> int -> int -> int -> int -> int -> int -> int -> unit
 
+val maxpool_fwd : tensor -> int -> int -> int -> int -> int -> int -> int -> int -> int -> tensor * tensor
+val maxpool_bwd : tensor -> tensor -> int -> int -> int -> int -> int -> int -> tensor
+val mul : tensor -> tensor -> tensor
+
 val add_bias : tensor -> tensor -> tensor
 val transpose : tensor -> tensor
 

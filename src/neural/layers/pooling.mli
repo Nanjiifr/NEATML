@@ -7,6 +7,7 @@ type t = {
   input_height : int;
   input_width : int;
   mutable input_cache : Tensor.t option;
+  mutable gpu_indices : Tensor.t option;
   mutable max_indices : (int array array) option;
 }
 
