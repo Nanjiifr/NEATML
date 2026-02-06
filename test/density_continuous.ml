@@ -8,39 +8,6 @@ exception Break
 
 let nbChannels = 1
 let automaton_size = 99
-let window_width = 1200
-let window_height = 1000
-
-let get_heatmap_color value =
-  (* 1. On s'assure que la valeur reste entre 0.0 et 1.0 *)
-  let v = max 0.0 (min 1.0 value) in
-
-  (* 2. Calcul des composantes R, G, B *)
-  let r, g, b =
-    if v < 0.5 then
-      (* Segment 1 : Bleu (0.0) -> Rouge (0.5) *)
-      let ratio = v /. 0.5 in
-      (* Normalise de 0..0.5 vers 0..1 *)
-      ( int_of_float (255. *. ratio),
-        (* R augmente *)
-        0,
-        (* G reste nul *)
-        int_of_float (255. *. (1. -. ratio))
-        (* B diminue *) )
-    else
-      (* Segment 2 : Rouge (0.5) -> Jaune (1.0) *)
-      let ratio = (v -. 0.5) /. 0.5 in
-      (* Normalise de 0.5..1 vers 0..1 *)
-      ( 255,
-        (* R reste au max *)
-        int_of_float (255. *. ratio),
-        (* G augmente *)
-        0
-        (* B reste nul *) )
-  in
-
-  (* 3. Retourne la couleur au format Graphics *)
-  Graphics.rgb r g b
 
 (* --- Automaton & Data Helpers --- *)
 let create_random () : automaton =
@@ -166,14 +133,6 @@ let evaluator (r : int) (dataset : automaton array) (g : genome) =
   !total_reward
 
 (* --- Visualization --- *)
-let draw_line (y : int) (a : automaton) =
-  let cell_width = window_width / automaton_size in
-  Array.iteri
-    (fun i c ->
-      Graphics.set_color (get_heatmap_color c.color);
-      Graphics.fill_rect (i * cell_width) y cell_width 10)
-    a
-
 let visualize_best (r : int) (g : genome) (wait : bool) =
   let n = automaton_size in
   let nets = Array.init n (fun _ -> Phenotype.create_phenotype g) in
@@ -187,56 +146,48 @@ let visualize_best (r : int) (g : genome) (wait : bool) =
       (if density > 0.5 then 1.0 else 0.0);
   flush stdout;
 
-  (* Setup Graphics *)
-  (try Graphics.open_graph (Printf.sprintf " %dx%d" window_width window_height)
-   with _ -> ());
-  Graphics.clear_graph ();
-  Graphics.set_color Graphics.black;
-  Graphics.fill_rect 0 0 window_width window_height;
+  let history = ref [] in
+  let max_steps = 100 in
+  let step = ref 0 in
 
-  let y = ref (window_height - 10) in
+  while !step < max_steps do
+    let line = Array.map (fun c -> c.color) !current_states in
+    history := line :: !history;
 
-  try
-    while !y >= 0 do
-      draw_line !y !current_states;
+    let c_st = !current_states in
+    let n_st = !next_states in
 
-      let c_st = !current_states in
-      let n_st = !next_states in
-
-      for i = 0 to n - 1 do
-        let inputs = get_inputs i c_st n r in
-        match Phenotype.predict nets.(i) inputs with
-        | raw_output :: new_signals ->
-            let delta = (raw_output -. 0.5) *. 2.0 in
-            let new_val = c_st.(i).color +. (delta *. 0.1) in
-            n_st.(i).color <- max 0.0 (min 1.0 new_val);
-            List.iteri (fun idx v -> n_st.(i).channels.(idx) <- v) new_signals
-        | [] -> ()
-      done;
-
-      (* Swap *)
-      let tmp = !current_states in
-      current_states := !next_states;
-      next_states := tmp;
-
-      y := !y - 10
-      (* Unix.sleepf 0.005 *)
-      (* Remove sleep for fast rendering of the map *)
+    for i = 0 to n - 1 do
+      let inputs = get_inputs i c_st n r in
+      match Phenotype.predict nets.(i) inputs with
+      | raw_output :: new_signals ->
+          let delta = (raw_output -. 0.5) *. 2.0 in
+          let new_val = c_st.(i).color +. (delta *. 0.1) in
+          n_st.(i).color <- max 0.0 (min 1.0 new_val);
+          List.iteri (fun idx v -> n_st.(i).channels.(idx) <- v) new_signals
+      | [] -> ()
     done;
-    if wait then (
-      Printf.printf "Visualization complete. Press key to exit.\n";
-      flush stdout;
-      ignore (Graphics.read_key ());
-      Graphics.close_graph ())
-  with _ -> Graphics.close_graph ()
+
+    let tmp = !current_states in
+    current_states := !next_states;
+    next_states := tmp;
+    step := !step + 1
+  done;
+
+  let open Matplotlib in
+  let data = Array.of_list (List.rev !history) in
+  let fig = Fig.create () in
+  let ax = Fig.add_subplot fig ~nrows:1 ~ncols:1 ~index:1 in
+  Ax.imshow ax ~cmap:"hot" (Imshow_data.scalar Imshow_data.float data);
+  Ax.set_title ax "Cellular Automaton Density Classification";
+  Ax.set_xlabel ax "Cells";
+  Ax.set_ylabel ax "Time";
+  Mpl.show ()
 
 let test_network filename r =
   let g = Parser.load_model filename in
   let n = automaton_size in
   let nets = Array.init n (fun _ -> Phenotype.create_phenotype g) in
-
-  (try Graphics.open_graph (Printf.sprintf " %dx%d" window_width window_height)
-   with _ -> ());
 
   let rec loop () =
     let target_density = Random.float 1.0 in
@@ -252,47 +203,52 @@ let test_network filename r =
     Printf.printf "Testing Density: %.2f\n" target_density;
     flush stdout;
 
-    Graphics.clear_graph ();
-    Graphics.set_color Graphics.black;
-    Graphics.fill_rect 0 0 window_width window_height;
+    let history = ref [] in
+    let max_steps = 100 in
+    for _ = 0 to max_steps - 1 do
+      let line = Array.map (fun c -> c.color) !current_states in
+      history := line :: !history;
 
-    let y = ref (window_height - 10) in
+      let c_st = !current_states in
+      let n_st = !next_states in
 
-    try
-      while !y >= 0 do
-        draw_line !y !current_states;
-
-        let c_st = !current_states in
-        let n_st = !next_states in
-
-        for i = 0 to n - 1 do
-          let inputs = get_inputs i c_st n r in
-          match Phenotype.predict nets.(i) inputs with
-          | raw_output :: new_signals ->
-              let delta = (raw_output -. 0.5) *. 2.0 in
-              let new_val = c_st.(i).color +. (delta *. 0.1) in
-              n_st.(i).color <- max 0.0 (min 1.0 new_val);
-              List.iteri (fun idx v -> n_st.(i).channels.(idx) <- v) new_signals
-          | [] -> ()
-        done;
-
-        let tmp = !current_states in
-        current_states := !next_states;
-        next_states := tmp;
-
-        y := !y - 10
+      for i = 0 to n - 1 do
+        let inputs = get_inputs i c_st n r in
+        match Phenotype.predict nets.(i) inputs with
+        | raw_output :: new_signals ->
+            let delta = (raw_output -. 0.5) *. 2.0 in
+            let new_val = c_st.(i).color +. (delta *. 0.1) in
+            n_st.(i).color <- max 0.0 (min 1.0 new_val);
+            List.iteri (fun idx v -> n_st.(i).channels.(idx) <- v) new_signals
+        | [] -> ()
       done;
 
-      Printf.printf "Press Space for new, q to quit.\n";
-      flush stdout;
-      let status = Graphics.read_key () in
-      if status = ' ' then loop () else if status = 'q' then () else loop ()
-    with _ -> ()
+      let tmp = !current_states in
+      current_states := !next_states;
+      next_states := tmp
+    done;
+
+    let open Matplotlib in
+    let data = Array.of_list (List.rev !history) in
+    let fig = Fig.create () in
+    let ax = Fig.add_subplot fig ~nrows:1 ~ncols:1 ~index:1 in
+    Ax.imshow ax ~cmap:"hot" (Imshow_data.scalar Imshow_data.float data);
+    Ax.set_title ax (Printf.sprintf "Density Test (Target %.2f)" target_density);
+    Mpl.show ();
+
+    Printf.printf "Press y for new, q to quit.\n";
+    flush stdout;
+    let status = read_line () in
+    if status = "y" then loop () else if status = "q" then () else loop ()
   in
-  loop ();
-  Graphics.close_graph ()
+  loop ()
 
 let _main () =
+  let lib_path = "/opt/homebrew/opt/python@3.14/Frameworks/Python.framework/Versions/3.14/lib/libpython3.14.dylib" in
+  if Sys.file_exists lib_path then
+    Py.initialize ~library_name:lib_path ~version:3 ()
+  else
+    Py.initialize ~version:3 ();
   Random.self_init ();
   let r = 3 in
 

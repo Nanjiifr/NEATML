@@ -42,3 +42,10 @@ val get_out_dim : t -> int
     @param model The sequential model
     @return The number of input features expected by the first layer *)
 val get_in_dim : t -> int
+
+(** [summary model] prints a Keras-style summary of the model architecture.
+    Displays layer types, output shapes, and parameter counts.
+    @param model The sequential model *)
+val summary : t -> unit
+
+val set_training_mode : t -> bool -> unit

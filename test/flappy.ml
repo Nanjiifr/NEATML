@@ -344,7 +344,8 @@ let main () =
      for epoch = 0 to epochs - 1 do
        total_evals := !total_evals + pop_size;
        let new_pop, new_sp, genomes_evaluated =
-         Evolution.generation !pop !l_species evaluator innov dynamic_threshold ()
+         Evolution.generation !pop !l_species evaluator innov dynamic_threshold
+           ()
        in
        pop := new_pop;
        l_species := new_sp;
@@ -405,13 +406,13 @@ let main () =
   let filename = "flappy_net" in
   Parser.save_model best_genome filename;
 
-  Graphics.close_graph ();
+  Visualizer.draw_genome best_genome
 
-  Visualizer.init_window ();
-  Visualizer.draw_genome best_genome;
-  Graphics.synchronize ();
-
-  ignore (Graphics.read_key ());
-  Graphics.close_graph ()
-
-let () = main ()
+let () =
+  let lib_path =
+    "/opt/homebrew/opt/python@3.14/Frameworks/Python.framework/Versions/3.14/lib/libpython3.14.dylib"
+  in
+  if Sys.file_exists lib_path then
+    Py.initialize ~library_name:lib_path ~version:3 ()
+  else Py.initialize ~version:3 ();
+  main ()

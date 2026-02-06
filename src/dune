@@ -2,5 +2,5 @@
 
 (library
  (name neatml)
- (libraries unix parmap graphics metal ctypes))
+ (libraries unix parmap matplotlib metal ctypes))
 

@@ -127,6 +127,27 @@ let iter_matrix f t =
       let m = Gpu.to_cpu g in
       Array.iteri (fun i row -> Array.iteri (fun j x -> f x i j) row) m
 
+let multiply_matrix_elementwise t1 t2 =
+  match t1, t2 with
+  | CPU m1, CPU m2 ->
+      if Array.length m1 <> Array.length m2 || Array.length m1.(0) <> Array.length m2.(0)
+      then failwith "Error: expected same sized matrices for element-wise mul";
+      CPU (Array.mapi (fun i row -> Array.mapi (fun j x -> x *. m2.(i).(j)) row) m1)
+  | GPU g1, GPU g2 ->
+      (* Fallback to CPU since Gpu.mul (element-wise) is not implemented *)
+      let m1 = Gpu.to_cpu g1 in
+      let m2 = Gpu.to_cpu g2 in
+      let res = Array.mapi (fun i row -> Array.mapi (fun j x -> x *. m2.(i).(j)) row) m1 in
+      if !use_gpu then GPU (Gpu.of_cpu res) else CPU res
+  | CPU m, GPU g -> 
+      let m2 = Gpu.to_cpu g in
+      let res = Array.mapi (fun i row -> Array.mapi (fun j x -> x *. m2.(i).(j)) row) m in
+      if !use_gpu then GPU (Gpu.of_cpu res) else CPU res
+  | GPU g, CPU m -> 
+      let m1 = Gpu.to_cpu g in
+      let res = Array.mapi (fun i row -> Array.mapi (fun j x -> x *. m.(i).(j)) row) m1 in
+      if !use_gpu then GPU (Gpu.of_cpu res) else CPU res
+
 let multiply_matrix t1 t2 =
   match t1, t2 with
   | CPU m, CPU n -> 

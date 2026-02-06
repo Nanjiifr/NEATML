@@ -1,7 +1,7 @@
 (executables
 (names flappy cellular_automaton cellular_continuous snake density_continuous xor_nn sine mnist test_metrics)
  (modules flappy cellular_automaton cellular_continuous snake density_continuous xor_nn sine mnist test_metrics)
- (libraries graphics unix neatml)
+ (libraries graphics unix neatml matplotlib)
 )
 
 (executable

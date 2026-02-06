@@ -13,6 +13,7 @@ val map2_mat : (float -> float -> float) -> Tensor.t -> Tensor.t -> Tensor.t
 val transpose : Tensor.t -> Tensor.t
 val scalar : float -> Tensor.t -> Tensor.t
 val multiply_matrix : Tensor.t -> Tensor.t -> Tensor.t
+val multiply_matrix_elementwise : Tensor.t -> Tensor.t -> Tensor.t
 val add_matrices : Tensor.t -> Tensor.t -> Tensor.t
 val iter_matrix : (float -> int -> int -> unit) -> Tensor.t -> unit
 val list_iter3 : ('a -> 'b -> 'c -> unit) -> 'a list -> 'b list -> 'c list -> unit

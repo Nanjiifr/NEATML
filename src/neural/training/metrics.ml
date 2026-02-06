@@ -131,6 +131,7 @@ let evaluate_dataset model x y batch_size name =
 
 let evaluate model x_train y_train x_test y_test batch_size =
   Utils.enable_gpu ();
+  Sequential.set_training_mode model false;
   let _ = evaluate_dataset model x_train y_train batch_size "Train Set" in
   let _ = evaluate_dataset model x_test y_test batch_size "Test Set" in
   ()

@@ -22,8 +22,16 @@ let create ?(beta1 = 0.9) ?(beta2 = 0.999) ?(eps = 1e-3) ?(weight_decay = 0.01)
     lr _ (seq : Sequential.t) =
   List.map
     (fun layer ->
-          let out_dim = match layer with Layer.Linear l -> Utils.rows l.weights | Layer.Conv2d c -> c.output_depth in
-          let in_dim = match layer with Layer.Linear l -> Utils.cols l.weights | Layer.Conv2d c -> c.input_depth in
+          let out_dim = match layer with 
+            | Layer.Linear l -> Utils.rows l.weights 
+            | Layer.Conv2d c -> c.output_depth
+            | _ -> 0 (* Ignored for parameterless layers *)
+          in
+          let in_dim = match layer with 
+            | Layer.Linear l -> Utils.cols l.weights 
+            | Layer.Conv2d c -> c.input_depth
+            | _ -> 0 (* Ignored *)
+          in
           
               (* Moments for weights *)
           
@@ -53,16 +61,28 @@ let create ?(beta1 = 0.9) ?(beta2 = 0.999) ?(eps = 1e-3) ?(weight_decay = 0.01)
           
                       DenseM m, DenseM v
           
+          | Layer.Dropout _ | Layer.MaxPool2d _ ->
+              let t = Utils.zeros 1 1 in
+              DenseM t, DenseM t (* Dummy, unused *)
                   in
           
               
           
           (* Moments for bias. Now both Linear and Conv2d use GPU if available *)
           let m_b, v_b = 
-              let t = Utils.zeros 1 out_dim in
-              let tm = if !Utils.use_gpu then Utils.to_gpu t else t in
-              let tv = if !Utils.use_gpu then Utils.to_gpu t else t in
-              tm, tv
+              match layer with
+              | Layer.Dropout _ | Layer.MaxPool2d _ -> 
+                  let t = Utils.zeros 1 1 in t, t
+              | Layer.Linear l ->
+                  let t = Utils.zeros 1 (Utils.rows l.weights) in
+                  let tm = if !Utils.use_gpu then Utils.to_gpu t else t in
+                  let tv = if !Utils.use_gpu then Utils.to_gpu t else t in
+                  tm, tv
+              | Layer.Conv2d c ->
+                  let t = Utils.zeros 1 c.output_depth in
+                  let tm = if !Utils.use_gpu then Utils.to_gpu t else t in
+                  let tv = if !Utils.use_gpu then Utils.to_gpu t else t in
+                  tm, tv
           in
       
               Adam 
@@ -115,6 +135,9 @@ let optimize_adam (layer : Layer.t) (grads : Gradients.t) (o : adam) =
                     
                     Conv2d.zero_grad l
             
+            | Layer.Dropout _, _, _, _ -> ()
+            | Layer.MaxPool2d _, _, _, _ -> ()
+            | _, Gradients.Empty, _, _ -> () (* Skip layers with no weight gradients *)
             | _ -> failwith "Optimizer: Unsupported layer"
           let update seq grads opt =
   Utils.list_iter3
@@ -160,10 +183,15 @@ let fit (model : Sequential.t) (xtrain : Tensor.t) (ytrain : Tensor.t)
   let val_loss = ref 0.0 in
   let running_loss = ref 0.0 in
   let loss_samples = ref 0 in
+
+  let train_history = ref [] in
+  let val_history = ref [] in
   
   (* Determine display refresh rate to avoid stalling pipeline with too many syncs *)
   (* For fast CNNs, updating every 10-20 batches is good. *)
   let refresh_rate = max 1 (n_batches / 20) in 
+
+  Sequential.set_training_mode model true;
 
   for epoch = 1 to epochs do
     for b = 0 to n_batches - 1 do
@@ -206,5 +234,9 @@ let fit (model : Sequential.t) (xtrain : Tensor.t) (ytrain : Tensor.t)
     
     (* Refresh status with final epoch data *)
     print_status epoch epochs n_batches n_batches !running_loss !val_loss global_start;
+
+    train_history := !running_loss :: !train_history;
+    val_history := !val_loss :: !val_history;
   done;
-  Printf.printf "\n\n\027[1;32m[Training Complete]\027[0m\n%!"
+  Printf.printf "\n\n\027[1;32m[Training Complete]\027[0m\n%!";
+  (List.rev !train_history, List.rev !val_history)

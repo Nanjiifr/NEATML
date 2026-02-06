@@ -4,14 +4,13 @@ open Neural.Layers
 open Neural.Models
 open Neural.Training
 open Neural.Core
-open Graphics
 
 let create_dataset n =
   Array.init n (fun _ ->
       let seed = Random.float (2. *. Float.pi) in
       (seed, sin seed))
 
-let main_neat () =
+let _main_neat () =
   Random.self_init ();
 
   let train_dataset =
@@ -70,58 +69,32 @@ let main_neat () =
 
   let nn = Phenotype.create_phenotype !best_genome in
 
-  open_graph " 800x600";
-  set_window_title "SINE Network: Reality vs Prediction";
+  (* Plotting with Matplotlib *)
+  let open Matplotlib in
+  let n_plot = 200 in
+  let xs =
+    Array.init n_plot (fun i ->
+        float i /. float (n_plot - 1) *. (2. *. Float.pi))
+  in
+  let ys_real = Array.map sin xs in
+  let ys_pred =
+    Array.map
+      (fun x ->
+        let x_norm = x /. (2. *. Float.pi) in
+        Phenotype.reset_network nn;
+        match Phenotype.predict nn [ x_norm ] with h :: _ -> h | [] -> 0.)
+      xs
+  in
 
-  let width = 800 in
-  let height = 600 in
-  let x_scale = float width /. (2. *. Float.pi) in
-  let y_scale = float height /. 2.5 in
-  let y_offset = height / 2 in
+  Pyplot.plot ~xs ~label:"Reality (sin x)" ys_real;
+  Pyplot.plot ~xs ~label:"Prediction" ys_pred;
+  Pyplot.legend ();
+  Pyplot.xlabel "x";
+  Pyplot.ylabel "sin(x)";
+  Pyplot.title "SINE NEAT: Reality vs Prediction";
+  Mpl.show ();
 
-  (* Draw axes *)
-  set_color (rgb 150 150 150);
-  moveto 0 y_offset;
-  lineto width y_offset;
-  moveto 0 0;
-  lineto 0 height;
-
-  (* Plot Real Sine (Blue) *)
-  set_color blue;
-  set_line_width 2;
-  for x_px = 0 to width - 1 do
-    let x = float x_px /. x_scale in
-    let y = sin x in
-    let y_px = int_of_float (y *. y_scale) + y_offset in
-    if x_px = 0 then moveto x_px y_px else lineto x_px y_px
-  done;
-
-  (* Plot Predicted Sine (Red) *)
-  set_color red;
-  set_line_width 2;
-  for x_px = 0 to width - 1 do
-    Phenotype.reset_network nn;
-    let x_real = float x_px /. x_scale in
-    let x_norm = x_real /. (2. *. Float.pi) in
-    let pred =
-      match Phenotype.predict nn [ x_norm ] with h :: _ -> h | [] -> 0.
-    in
-    let y_px = int_of_float (pred *. y_scale) + y_offset in
-
-    if x_px = 0 then moveto x_px y_px else lineto x_px y_px
-  done;
-
-  (* Legend *)
-  set_color blue;
-  moveto (width - 150) (height - 30);
-  draw_string "Reality (sin x)";
-  set_color red;
-  moveto (width - 150) (height - 50);
-  draw_string "Prediction";
-
-  Printf.printf "Press any key to close the window...\n";
-  ignore (wait_next_event [ Key_pressed ]);
-  close_graph ()
+  Visualizer.draw_genome !best_genome
 
 let _main () =
   Random.self_init ();
@@ -169,6 +142,8 @@ let _main () =
     }
   in
 
+  Sequential.summary model;
+
   let lr = 0.001 in
   let optimizers = Optimizer.create lr Optimizer.Adam model in
 
@@ -179,72 +154,49 @@ let _main () =
   flush stdout;
 
   (* Optimizer.fit now reports timing per epoch *)
-  Optimizer.fit model x_train y_train x_test y_test batch_size 500 optimizers
-    Errors.MSE;
+  let _ =
+    Optimizer.fit model x_train y_train x_test y_test batch_size 500 optimizers
+      Errors.MSE
+  in
 
   Printf.printf "\027[1;32m[SUCCESS]\027[0m Training complete. \n";
 
-  (* 4. Visualization *)
-  let open Graphics in
-  open_graph " 800x600";
-  set_window_title "SINE Network: Reality vs Prediction";
+  (* Plotting with Matplotlib *)
+  let open Matplotlib in
+  let n_plot = 200 in
+  let xs =
+    Array.init n_plot (fun i ->
+        float i /. float (n_plot - 1) *. (2. *. Float.pi))
+  in
+  let ys_real = Array.map sin xs in
+  let ys_pred =
+    Array.map
+      (fun x ->
+        let x_tensor = Tensor.CPU [| [| x |] |] in
+        let x_gpu =
+          if !Utils.use_gpu then Utils.to_gpu x_tensor else x_tensor
+        in
+        let pred_tensor = Sequential.forward_seq model x_gpu in
+        let pred = (Utils.to_cpu pred_tensor).(0).(0) in
+        (match pred_tensor with Tensor.GPU g -> Gpu.release g | _ -> ());
+        (match x_gpu with Tensor.GPU g -> Gpu.release g | _ -> ());
+        pred)
+      xs
+  in
 
-  let width = 800 in
-  let height = 600 in
-  let x_scale = float width /. (2. *. Float.pi) in
-  let y_scale = float height /. 2.5 in
-  let y_offset = height / 2 in
+  Pyplot.plot ~xs ~label:"Reality (sin x)" ys_real;
+  Pyplot.plot ~xs ~label:"Prediction" ys_pred;
+  Pyplot.legend ();
+  Pyplot.xlabel "x";
+  Pyplot.ylabel "sin(x)";
+  Pyplot.title "SINE Network: Reality vs Prediction";
+  Mpl.show ()
 
-  (* Draw axes *)
-  set_color (rgb 150 150 150);
-  moveto 0 y_offset;
-  lineto width y_offset;
-  moveto 0 0;
-  lineto 0 height;
-
-  (* Plot Real Sine (Blue) *)
-  set_color blue;
-  set_line_width 2;
-  for x_px = 0 to width - 1 do
-    let x = float x_px /. x_scale in
-    let y = sin x in
-    let y_px = int_of_float (y *. y_scale) + y_offset in
-    if x_px = 0 then moveto x_px y_px else lineto x_px y_px
-  done;
-
-  (* Plot Predicted Sine (Red) *)
-  set_color red;
-  set_line_width 2;
-  let sample_points = 200 in
-  for i = 0 to sample_points - 1 do
-    let x = float i /. float sample_points *. (2. *. Float.pi) in
-    let x_tensor = Tensor.CPU [| [| x |] |] in
-    let x_gpu = if !Utils.use_gpu then Utils.to_gpu x_tensor else x_tensor in
-    let pred_tensor = Sequential.forward_seq model x_gpu in
-    let pred = (Utils.to_cpu pred_tensor).(0).(0) in
-
-    let x_px = int_of_float (x *. x_scale) in
-    let y_px = int_of_float (pred *. y_scale) + y_offset in
-
-    if i = 0 then moveto x_px y_px else lineto x_px y_px;
-
-    (* Cleanup GPU prediction if needed *)
-    (match pred_tensor with
-    | Tensor.GPU g -> Gpu.release g
-    | _ -> ());
-    match x_gpu with Tensor.GPU g -> Gpu.release g | _ -> ()
-  done;
-
-  (* Legend *)
-  set_color blue;
-  moveto (width - 150) (height - 30);
-  draw_string "Reality (sin x)";
-  set_color red;
-  moveto (width - 150) (height - 50);
-  draw_string "Prediction";
-
-  Printf.printf "Press any key to close the window...\n";
-  ignore (wait_next_event [ Key_pressed ]);
-  close_graph ()
-
-let () = main_neat ()
+let () =
+  let lib_path =
+    "/opt/homebrew/opt/python@3.14/Frameworks/Python.framework/Versions/3.14/lib/libpython3.14.dylib"
+  in
+  if Sys.file_exists lib_path then
+    Py.initialize ~library_name:lib_path ~version:3 ()
+  else Py.initialize ~version:3 ();
+  _main ()

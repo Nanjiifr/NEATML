@@ -388,7 +388,7 @@ let main () =
   let output_size = 4 in
 
   let pop_size = 300 in
-  let epochs = 1000 in
+  let epochs = 250 in
   let target_fitness = 10000. in
   let maps_per_genome = 25 in
 
@@ -478,6 +478,15 @@ let main () =
   Evolution.print_training_stats !total_evals duration avg_fitness
     best_genome.fitness;
   Parser.save_model best_genome "snake_net";
-  Printf.printf "Model saved.\n"
+  Printf.printf "Model saved.\n";
 
-let () = main ()
+  Visualizer.draw_genome best_genome
+
+let () =
+  let lib_path =
+    "/opt/homebrew/opt/python@3.14/Frameworks/Python.framework/Versions/3.14/lib/libpython3.14.dylib"
+  in
+  if Sys.file_exists lib_path then
+    Py.initialize ~library_name:lib_path ~version:3 ()
+  else Py.initialize ~version:3 ();
+  main ()

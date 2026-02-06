@@ -33,7 +33,7 @@ let () =
 
   (* Train the model *)
   Printf.printf "Training XOR Neural Network...\n";
-  Optimizer.fit 
+  let _ = Optimizer.fit 
     model 
     x_train 
     y_train 
@@ -42,6 +42,7 @@ let () =
     4 (* Batch size *) 
     1000 (* Epochs *) 
     optimizers 
-    Errors.MSE;
+    Errors.MSE
+  in
 
   Printf.printf "Training complete.\n"

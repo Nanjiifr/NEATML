@@ -1,6 +1,7 @@
 type weight_grad =
   | Dense of Tensor.t
   | Conv of Tensor.t array array
+  | Empty
 
 (** Gradient record containing all computed gradients from backpropagation *)
 type t = {

@@ -76,6 +76,73 @@ let load_mnist_data () =
     to_tensor x_test_cpu,
     to_tensor y_test_cpu )
 
+let visualize_results train_losses val_losses x_test model =
+  let open Matplotlib in
+  let epochs = List.length train_losses in
+
+  (* 1. Plot Losses *)
+  let x_axis = Array.init epochs (fun i -> float_of_int (i + 1)) in
+  let y_train_plot = Array.of_list train_losses in
+  let y_val_plot = Array.of_list val_losses in
+
+  Pyplot.plot ~xs:x_axis ~label:"Train Loss" y_train_plot;
+  Pyplot.plot ~xs:x_axis ~label:"Validation Loss" y_val_plot;
+  Pyplot.legend ();
+  Pyplot.xlabel "Epochs";
+  Pyplot.ylabel "Loss";
+  Pyplot.title "Training vs Validation Loss";
+  Mpl.show ();
+
+  (* 2. Show 10 Random Predictions *)
+  let test_cpu = Utils.to_cpu x_test in
+  let n_test = Array.length test_cpu in
+
+  let argmax arr =
+    let max_val = ref neg_infinity in
+    let max_idx = ref (-1) in
+    Array.iteri
+      (fun i v ->
+        if v > !max_val then (
+          max_val := v;
+          max_idx := i))
+      arr;
+    !max_idx
+  in
+
+  let fig = Fig.create () in
+  for i = 0 to 9 do
+    let idx = Random.int n_test in
+    let img_flat = test_cpu.(idx) in
+
+    (* Reshape 784 -> 28x28 *)
+    let img_2d = Array.make_matrix 28 28 0.0 in
+    for r = 0 to 27 do
+      for c = 0 to 27 do
+        img_2d.(r).(c) <- img_flat.((r * 28) + c)
+      done
+    done;
+
+    (* Predict *)
+    let input_batch = [| img_flat |] in
+    let t_in =
+      if !Utils.use_gpu then Tensor.GPU (Gpu.of_cpu input_batch)
+      else Tensor.CPU input_batch
+    in
+    let pred_t = Sequential.forward_seq model t_in in
+    let pred_cpu = (Utils.to_cpu pred_t).(0) in
+
+    (match t_in with Tensor.GPU g -> Gpu.release g | _ -> ());
+    (match pred_t with Tensor.GPU g -> Gpu.release g | _ -> ());
+
+    let pred_label = argmax pred_cpu in
+
+    let ax = Fig.add_subplot fig ~nrows:2 ~ncols:5 ~index:(i + 1) in
+    Ax.imshow ax ~cmap:"gray" (Imshow_data.scalar Imshow_data.float img_2d);
+    Ax.set_title ax (Printf.sprintf "Pred: %d" pred_label);
+    Ax.Expert.to_pyobject ax |> ignore
+  done;
+  Mpl.show ()
+
 let _main_mlp () =
   Random.self_init ();
 
@@ -97,18 +164,33 @@ let _main_mlp () =
   in
 
   let model =
-    { Sequential.layers = [ Layer.Linear hidden1; Layer.Linear output_layer ] }
+    {
+      Sequential.layers =
+        [
+          Layer.Linear hidden1;
+          Layer.Dropout (Dropout.create 0.25);
+          Layer.Linear output_layer;
+        ];
+    }
   in
 
+  Sequential.summary model;
+
+  Printf.printf "Evaluating initial state...\n%!";
   Metrics.evaluate model x_train y_train x_test y_test batch_size;
 
   let lr = 0.001 in
   let optimizer = Optimizer.create lr Optimizer.Adam model in
+  let epochs = 25 in
 
-  Optimizer.fit model x_train y_train x_test y_test batch_size 25 optimizer
-    Errors.CROSS_ENTROPY;
+  (* Use Optimizer.fit and get history *)
+  let train_losses, val_losses =
+    Optimizer.fit model x_train y_train x_test y_test batch_size epochs
+      optimizer Errors.CROSS_ENTROPY
+  in
 
-  Metrics.evaluate model x_train y_train x_test y_test batch_size
+  Metrics.evaluate model x_train y_train x_test y_test batch_size;
+  visualize_results train_losses val_losses x_test model
 
 let _main_cnn () =
   Random.self_init ();
@@ -137,15 +219,27 @@ let _main_cnn () =
     }
   in
 
+  Sequential.summary model;
+
   Printf.printf "\n\027[1;34m[INFO]\027[0m Training CNN on MNIST...\n%!";
   Metrics.evaluate model x_train y_train x_test y_test batch_size;
 
   let lr = 0.001 in
   let optimizer = Optimizer.create lr Optimizer.Adam model in
 
-  Optimizer.fit model x_train y_train x_test y_test batch_size 10 optimizer
-    Errors.CROSS_ENTROPY;
+  let train_losses, val_losses =
+    Optimizer.fit model x_train y_train x_test y_test batch_size 10 optimizer
+      Errors.CROSS_ENTROPY
+  in
 
-  Metrics.evaluate model x_train y_train x_test y_test batch_size
+  Metrics.evaluate model x_train y_train x_test y_test batch_size;
+  visualize_results train_losses val_losses x_test model
 
-let () = _main_cnn ()
+let () =
+  let lib_path =
+    "/opt/homebrew/opt/python@3.14/Frameworks/Python.framework/Versions/3.14/lib/libpython3.14.dylib"
+  in
+  if Sys.file_exists lib_path then
+    Py.initialize ~library_name:lib_path ~version:3 ()
+  else Py.initialize ~version:3 ();
+  _main_mlp ()

@@ -61,7 +61,8 @@ val update : Sequential.t -> Gradients.t list -> t list -> unit
     @param batchsize The batch size for mini-batch training
     @param epochs Number of training epochs
     @param opt List of optimizer states
-    @param err The loss function to use *)
+    @param err The loss function to use 
+    @return A tuple of (train_losses, val_losses) where each list contains the loss for each epoch *)
 val fit :
   Sequential.t ->
   Tensor.t ->
@@ -72,4 +73,4 @@ val fit :
   int ->
   t list ->
   Errors.t ->
-  unit
+  (float list * float list)

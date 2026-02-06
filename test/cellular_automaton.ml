@@ -228,7 +228,6 @@ let _main () =
 
   visualize_best_genome n r best_genome;
 
-  Visualizer.init_window ();
   Visualizer.draw_genome best_genome;
   ignore (Graphics.read_key ());
   Graphics.close_graph ();
