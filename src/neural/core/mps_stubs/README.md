@@ -135,16 +135,16 @@ let add (a : tensor) (b : tensor) : tensor = ...
 let relu (x : tensor) : tensor = ...
 ```
 
-## Comparaison Performance Attendue
+## Comparaison Performance Théorique
 
-| Opération | Ancien (Metal bindings) | Nouveau (MPS direct) | Gain |
-|-----------|------------------------|----------------------|------|
+| Opération | Ancien (Metal bindings) | Nouveau (MPS direct) | Gain Estimé |
+|-----------|------------------------|----------------------|-------------|
 | MatMul 1024x1024 | ~5ms | ~2ms | 2.5x |
 | Conv2D 256 filters | ~15ms | ~6ms | 2.5x |
 | Batch operations | ~50ms | ~20ms | 2.5x |
 | Memory overhead | ~200MB | ~80MB | 2.5x |
 
-*Gains estimés basés sur les benchmarks PyTorch MPS vs Metal direct*
+**Note**: Ces gains sont des estimations théoriques basées sur les benchmarks PyTorch MPS vs Metal direct. Les performances réelles peuvent varier selon le matériel et les workloads spécifiques. Des benchmarks détaillés seront ajoutés dans une future mise à jour.
 
 ## Limitations Connues
 
