@@ -440,14 +440,14 @@ let mse_grad predictions targets scale =
    ============================================================================ *)
 
 let conv2d_direct_fwd input weights bias output n in_h in_w out_h out_w kh kw in_d out_d act =
-  (* This is a simplified stub - full implementation would use mps_conv2d_forward *)
-  Printf.fprintf stderr "Warning: conv2d_direct_fwd not fully implemented in MPS backend\n%!"
+  (* Conv2D requires MPSImage not MPSMatrix - not yet implemented *)
+  failwith "conv2d_direct_fwd: Not implemented in MPS backend (requires MPSImage support)"
 
-let conv2d_direct_bwd_input grad_output weights grad_input n in_h in_w kh kw in_d out_d =
-  Printf.fprintf stderr "Warning: conv2d_direct_bwd_input not fully implemented in MPS backend\n%!"
+let conv2d_direct_bwd_input grad_output weights grad_input n in_h in_w out_h out_w kh kw in_d out_d =
+  failwith "conv2d_direct_bwd_input: Not implemented in MPS backend (requires MPSImage support)"
 
-let conv2d_direct_bwd_weights input grad_output grad_weights n in_h in_w kh kw in_d out_d =
-  Printf.fprintf stderr "Warning: conv2d_direct_bwd_weights not fully implemented in MPS backend\n%!"
+let conv2d_direct_bwd_weights input grad_output grad_weights n in_h in_w out_h out_w kh kw in_d out_d =
+  failwith "conv2d_direct_bwd_weights: Not implemented in MPS backend (requires MPSImage support)"
 
 let conv2d_bias_bwd grad_output grad_bias n out_h out_w out_d =
   Printf.fprintf stderr "Warning: conv2d_bias_bwd not fully implemented in MPS backend\n%!"
