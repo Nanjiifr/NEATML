@@ -184,12 +184,13 @@ kernel void tanh_bwd(
 kernel void conv2d_bias_bwd(
     device const float *grad_out [[buffer(0)]],
     device float *grad_b [[buffer(1)]],
-    constant int &N [[buffer(2)]],
-    constant int &OutH [[buffer(3)]],
-    constant int &OutW [[buffer(4)]],
-    constant int &out_depth [[buffer(5)]],
+    constant int *params [[buffer(2)]],
     uint oc [[thread_position_in_grid]])
 {
+    int N = params[0];
+    int OutH = params[1];
+    int OutW = params[2];
+    int out_depth = params[3];
     if (oc >= uint(out_depth)) return;
     float sum = 0.0;
     int spatial_size = OutH * OutW;
@@ -313,10 +314,11 @@ kernel void mse_grad(
 kernel void mat_transpose(
     device const float *A [[buffer(0)]],
     device float *B [[buffer(1)]],
-    constant int &rows [[buffer(2)]],
-    constant int &cols [[buffer(3)]],
+    constant int *params [[buffer(2)]],
     uint2 id [[thread_position_in_grid]])
 {
+    int rows = params[0];
+    int cols = params[1];
     if (id.x >= uint(cols) || id.y >= uint(rows)) return;
     B[id.x * rows + id.y] = A[id.y * cols + id.x];
 }
@@ -324,9 +326,10 @@ kernel void mat_transpose(
 kernel void add_bias(
     device float *X [[buffer(0)]],
     device const float *bias [[buffer(1)]],
-    constant int &cols [[buffer(2)]],
+    constant int *params [[buffer(2)]],
     uint2 id [[thread_position_in_grid]])
 {
+    int cols = params[0];
     if (id.x >= uint(cols)) return;
     X[id.y * cols + id.x] += bias[id.x];
 }
@@ -335,10 +338,11 @@ kernel void confusion_matrix_update(
     device const float *preds [[buffer(0)]],
     device const float *targets [[buffer(1)]],
     device atomic_uint *cm [[buffer(2)]],
-    constant int &N [[buffer(3)]],
-    constant int &C [[buffer(4)]],
+    constant int *params [[buffer(3)]],
     uint id [[thread_position_in_grid]])
 {
+    int N = params[0];
+    int C = params[1];
     if (id >= uint(N)) return;
     
     // Find argmax for pred
@@ -1175,18 +1179,22 @@ let adam_step w g m v lr b1 b2 b1p b2p eps wd =
   (* Packed AdamParams struct *)
   let param_buf = get_param_buffer ctx in
   let p = Buffer.contents param_buf |> coerce (ptr void) (ptr float) in
-  let ca = CArray.from_ptr p 8 in
+  let ca = CArray.from_ptr p 7 in
   CArray.set ca 0 lr; CArray.set ca 1 b1; CArray.set ca 2 b2;
   CArray.set ca 3 b1p; CArray.set ca 4 b2p; CArray.set ca 5 eps; CArray.set ca 6 wd;
-  let p_int = coerce (ptr float) (ptr int) (CArray.start ca) in
-  (<-@) (p_int +@ 7) total;
   ComputeCommandEncoder.set_buffer enc param_buf ~index:4;
+  (* Separate len parameter *)
+  let len_buf = get_param_buffer ctx in
+  let p_int = Buffer.contents len_buf |> coerce (ptr void) (ptr int) in
+  (<-@) p_int total;
+  ComputeCommandEncoder.set_buffer enc len_buf ~index:5;
   ComputeCommandEncoder.dispatch_threadgroups enc
     ~threadgroups_per_grid:{width=(total+1023)/1024; height=1; depth=1}
     ~threads_per_threadgroup:{width=1024; height=1; depth=1};
   ComputeCommandEncoder.end_encoding enc;
   increment_command_count ctx;
-  return_param_buffer ctx param_buf
+  return_param_buffer ctx param_buf;
+  return_param_buffer ctx len_buf
 
 let mse_grad p t scale =
   let ctx = get_ctx () in
@@ -1197,18 +1205,21 @@ let mse_grad p t scale =
   ComputeCommandEncoder.set_buffer enc p.buffer ~index:0;
   ComputeCommandEncoder.set_buffer enc t.buffer ~index:1;
   ComputeCommandEncoder.set_buffer enc res_entry.buffer ~index:2;
-  let param_buf = get_param_buffer ctx in
-  let p_ptr = Buffer.contents param_buf |> coerce (ptr void) (ptr float) in
-  (<-@) p_ptr scale;
-  let p_int = coerce (ptr float) (ptr int) (p_ptr +@ 1) in
+  let scale_buf = get_param_buffer ctx in
+  let p_float = Buffer.contents scale_buf |> coerce (ptr void) (ptr float) in
+  (<-@) p_float scale;
+  ComputeCommandEncoder.set_buffer enc scale_buf ~index:3;
+  let len_buf = get_param_buffer ctx in
+  let p_int = Buffer.contents len_buf |> coerce (ptr void) (ptr int) in
   (<-@) p_int total;
-  ComputeCommandEncoder.set_buffer enc param_buf ~index:3;
+  ComputeCommandEncoder.set_buffer enc len_buf ~index:4;
   ComputeCommandEncoder.dispatch_threadgroups enc
     ~threadgroups_per_grid:{width=(total+1023)/1024; height=1; depth=1}
     ~threads_per_threadgroup:{width=1024; height=1; depth=1};
   ComputeCommandEncoder.end_encoding enc;
   increment_command_count ctx;
-  return_param_buffer ctx param_buf;
+  return_param_buffer ctx scale_buf;
+  return_param_buffer ctx len_buf;
   { buffer = res_entry.buffer; rows = p.rows; cols = p.cols; released = false }
 
 (* ============================================================================
