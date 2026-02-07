@@ -2,5 +2,5 @@
 
 (library
  (name neatml)
- (libraries unix parmap matplotlib metal ctypes))
+ (libraries unix parmap matplotlib metal ctypes ctypes.foreign neatml.mps_stubs))
 
