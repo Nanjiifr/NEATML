@@ -1321,7 +1321,7 @@ let permute_nchw_nhwc input output n h w c =
   increment_command_count ctx;
   return_param_buffer ctx param_buf
 
-let conv2d_direct_fwd input weights bias output n in_h in_w out_h out_w kh kw in_d out_d act =
+let conv2d_direct_fwd input weights bias output n in_h in_w out_h out_w kh kw in_d out_d _act =
   let ctx = get_ctx () in
   let col_len = n * out_h * out_w * in_d * kh * kw in
   let cols_entry = get_buffer ctx (col_len * 4) in
@@ -1349,7 +1349,7 @@ let conv2d_direct_fwd input weights bias output n in_h in_w out_h out_w kh kw in
   increment_command_count ctx;
   
   return_param_buffer ctx param_buf;
-  release w_t; release res;
+  release w_t; release res; release cols_t;
   release_buffer ctx cols_entry
 
 let conv2d_direct_bwd_weights input grad_out grad_w n in_h in_w out_h out_w kh kw in_d out_d =
@@ -1383,7 +1383,7 @@ let conv2d_direct_bwd_weights input grad_out grad_w n in_h in_w out_h out_w kh k
   increment_command_count ctx;
   
   return_param_buffer ctx param_buf;
-  release dz_t; release gw_mat;
+  release dz_t; release gw_mat; release dz_nhwc; release cols_t;
   release_buffer ctx dz_nhwc_entry;
   release_buffer ctx cols_entry
 
@@ -1397,7 +1397,7 @@ let conv2d_direct_bwd_input grad_out weights grad_in n in_h in_w out_h out_w kh 
   
   col2im d_cols grad_in n in_d in_h in_w out_h out_w kh kw;
   
-  release d_cols;
+  release d_cols; release dz_nhwc;
   release_buffer ctx dz_nhwc_entry
 
 (* ============================================================================
