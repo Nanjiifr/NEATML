@@ -3,4 +3,4 @@
  (public_name neatml.mps_stubs)
  (c_names mps_stubs)
  (c_flags (:standard -x objective-c++ -fobjc-arc -Wno-deprecated-declarations))
- (c_library_flags (:standard -framework Foundation -framework Metal -framework MetalPerformanceShaders)))
+ (c_library_flags (:standard -framework Foundation -framework Metal -framework MetalPerformanceShaders -lc++)))

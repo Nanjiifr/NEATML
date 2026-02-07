@@ -380,7 +380,8 @@ let linear_fwd input weights bias batch in_dim out_dim activation =
     (Unsigned.Size_t.of_int batch)
     (Unsigned.Size_t.of_int out_dim) in
   
-  let bias_mat = if bias.cols > 0 then bias.matrix else from_voidp void null in
+  let bias_mat = if bias.cols > 0 && not bias.released then bias.matrix 
+                 else coerce (ptr void) mps_matrix null in
   
   mps_linear_forward (get_cmd_buffer ()) input.matrix weights.matrix 
     bias_mat output activation;

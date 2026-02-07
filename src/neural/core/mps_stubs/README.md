@@ -10,10 +10,29 @@ Cette architecture abandonne le module OCaml Metal au profit d'une implémentati
 src/neural/core/
 ├── mps_stubs/
 │   ├── mps_stubs.h       # Interface C/C++ pour MPS
-│   ├── mps_stubs.mm      # Implémentation Objective-C++ (à créer)
+│   ├── mps_stubs.mm      # Implémentation Objective-C++ (COMPLETE)
 │   └── dune              # Configuration de build
-├── gpu.ml                # Interface OCaml vers MPS stubs
+├── gpu_mps.ml            # Bindings OCaml vers MPS stubs (COMPLETE)
+├── gpu.ml                # Interface OCaml Metal (ancien)
 └── gpu.mli               # Interface publique (inchangée)
+```
+
+## Utilisation
+
+### Option 1: Utiliser le backend MPS (nouveau)
+
+```ocaml
+(* Remplacer dans votre code: *)
+open Gpu          (* Ancien backend Metal direct *)
+
+(* Par: *)
+module Gpu = Gpu_mps  (* Nouveau backend MPS optimisé *)
+```
+
+### Option 2: Configuration par variable d'environnement
+
+```bash
+export NEATML_GPU_BACKEND=mps
 ```
 
 ## Avantages par rapport à l'ancien module Metal
@@ -25,8 +44,8 @@ src/neural/core/
 - **Pas de couche d'abstraction supplémentaire**: Accès direct aux primitives MPS
 
 ### 2. Mémoire
-- **MPSTemporaryMatrix**: Gestion automatique de la mémoire GPU
-- **Buffer pooling natif**: Implémenté par MPS
+- **Gestion automatique**: Libération automatique des buffers GPU
+- **Buffer pooling**: Réutilisation efficace de la mémoire
 - **Moins de copies**: Opérations in-place quand possible
 
 ### 3. Maintenabilité
@@ -63,41 +82,57 @@ void mps_conv2d_forward(mps_command_buffer_t cmd_buffer,
                         mps_matrix_t output, int batch_size);
 ```
 
-## Prochaines Étapes
+## Implémentation Complète
 
-### Implémentation Complète (mps_stubs.mm)
+### Opérations Implémentées
 
-1. **Implémenter toutes les fonctions MPS**:
-   - Utiliser `MPSMatrixMultiplication` pour matmul
-   - Utiliser `MPSCNNConvolution` pour conv2d
-   - Utiliser `MPSCNNPoolingMax` pour maxpool
-   - Utiliser `MPSMatrixSum` pour additions
-   
-2. **Optimisations spécifiques**:
-   - Fused operations (linear + activation en un seul kernel MPS)
-   - Batch operations pour réduire overhead
-   - Memory pooling avec MPSTemporaryMatrix
+#### ✅ Opérations de Base
+- [x] `mps_matmul` - Multiplication matricielle (MPSMatrixMultiplication)
+- [x] `mps_matrix_add` - Addition matricielle
+- [x] `mps_matrix_mul_elementwise` - Multiplication élément par élément
+- [x] `mps_matrix_transpose` - Transposition
 
-3. **Configuration dune**:
-```dune
-(library
- (name mps_stubs)
- (public_name neatml.mps_stubs)
- (c_names mps_stubs)
- (c_flags (:standard -x objective-c++))
- (c_library_flags (:standard -framework Foundation -framework Metal 
-                   -framework MetalPerformanceShaders)))
-```
+#### ✅ Fonctions d'Activation
+- [x] `mps_relu_forward` - ReLU activation
+- [x] `mps_sigmoid_forward` - Sigmoid activation
+- [x] `mps_tanh_forward` - Tanh activation
 
-### Bindings OCaml (gpu.ml)
+#### ✅ Couches Linéaires
+- [x] `mps_linear_forward` - Forward pass avec activation optionnelle
+- [x] `mps_linear_backward_weights` - Backward pour les poids et biais
+- [x] `mps_linear_backward_input` - Backward pour les entrées
 
-Remplacer l'implémentation actuelle par des appels aux stubs C:
+#### ✅ Optimiseurs
+- [x] `mps_adam_step` - Adam optimizer avec weight decay
+
+#### ✅ Utilitaires
+- [x] `mps_matrix_zero` - Mettre à zéro un tenseur
+- [x] `mps_matrix_copy` - Copier un tenseur
+- [x] `mps_mse_gradient` - Gradient MSE loss
+
+#### ⚠️ Opérations Partielles (API stub pour compatibilité)
+- [ ] `mps_conv2d_forward` - Convolution 2D (nécessite MPSImage)
+- [ ] `mps_maxpool_forward` - Max pooling (nécessite MPSImage)
+- [ ] Opérations backward pour conv/pool
+
+### Bindings OCaml (gpu_mps.ml)
+
+Tous les bindings OCaml sont implémentés avec Ctypes.Foreign:
 
 ```ocaml
-external mps_device_create : unit -> mps_device = "caml_mps_device_create"
-external mps_matrix_create : mps_device -> int -> int -> mps_matrix = "caml_mps_matrix_create"
-external mps_matmul : mps_command_buffer -> mps_matrix -> mps_matrix -> 
-                      mps_matrix -> float -> float -> unit = "caml_mps_matmul_bytecode" "caml_mps_matmul"
+(* Foreign function bindings *)
+let mps_device_create = 
+  foreign "mps_device_create" (void @-> returning mps_device)
+
+let mps_matmul = 
+  foreign "mps_matmul" 
+    (mps_command_buffer @-> mps_matrix @-> mps_matrix @-> mps_matrix @-> 
+     float @-> float @-> returning void)
+
+(* High-level OCaml API matching gpu.mli *)
+let matmul (a : tensor) (b : tensor) : tensor = ...
+let add (a : tensor) (b : tensor) : tensor = ...
+let relu (x : tensor) : tensor = ...
 ```
 
 ## Comparaison Performance Attendue
@@ -111,6 +146,31 @@ external mps_matmul : mps_command_buffer -> mps_matrix -> mps_matrix ->
 
 *Gains estimés basés sur les benchmarks PyTorch MPS vs Metal direct*
 
+## Limitations Connues
+
+1. **Convolution/Pooling**: Les opérations CNN nécessitent MPSImage au lieu de MPSMatrix, ce qui requiert une conversion de format. Pour l'instant, des stubs sont fournis pour la compatibilité API.
+
+2. **Tenseurs 4D**: Les opérations CNN natives de MPS attendent des images 4D (NCHW ou NHWC), pas des matrices 2D aplaties.
+
+3. **Backward pass CNN**: Les gradients de convolution/pooling nécessitent MPSCNNConvolutionGradient, non implémenté dans cette version.
+
+## Prochaines Étapes
+
+### Court Terme
+- [ ] Tests unitaires pour toutes les opérations
+- [ ] Benchmarks de performance
+- [ ] Documentation complète des APIs
+
+### Moyen Terme
+- [ ] Implémenter MPSImage pour CNN
+- [ ] Support complet conv2d/maxpool backward
+- [ ] Optimisations mémoire avancées
+
+### Long Terme
+- [ ] Support mixed precision (FP16)
+- [ ] Graph optimization
+- [ ] Multi-GPU support
+
 ## Références
 
 - [PyTorch MPS Backend](https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/mps)
@@ -122,8 +182,9 @@ external mps_matmul : mps_command_buffer -> mps_matrix -> mps_matrix ->
 
 - [x] Architecture définie
 - [x] Interface C créée (mps_stubs.h)
-- [ ] Implémentation C/Objective-C++ (mps_stubs.mm) - EN COURS
-- [ ] Bindings OCaml (gpu.ml refactor)
-- [ ] Configuration dune
+- [x] Implémentation C/Objective-C++ (mps_stubs.mm) - **COMPLETE**
+- [x] Bindings OCaml (gpu_mps.ml) - **COMPLETE**
+- [x] Configuration dune
 - [ ] Tests et benchmarks
 - [ ] Documentation complète
+

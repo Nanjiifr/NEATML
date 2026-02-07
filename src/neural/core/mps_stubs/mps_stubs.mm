@@ -46,14 +46,14 @@ struct MPSCommandBuffer {
     }
 };
 
-struct MPSMatrix {
+struct MPSMatrixWrapper {
     MPSMatrixDescriptor* descriptor;
     id<MTLBuffer> buffer;
     size_t rows;
     size_t cols;
     MPSDevice* device;
     
-    MPSMatrix(MPSDevice* dev, size_t r, size_t c) 
+    MPSMatrixWrapper(MPSDevice* dev, size_t r, size_t c) 
         : rows(r), cols(c), device(dev) {
         descriptor = [MPSMatrixDescriptor 
             matrixDescriptorWithRows:rows 
@@ -66,14 +66,9 @@ struct MPSMatrix {
                                           options:MTLResourceStorageModeShared];
     }
     
-    ~MPSMatrix() {
+    ~MPSMatrixWrapper() {
         buffer = nil;
         descriptor = nil;
-    }
-    
-    MPSMatrix* createMPSMatrix() {
-        return [[MPSMatrix alloc] initWithBuffer:buffer 
-                                      descriptor:descriptor];
     }
 };
 
@@ -163,7 +158,7 @@ mps_matrix_t mps_matrix_create(mps_device_t device, size_t rows, size_t cols) {
     
     try {
         MPSDevice* dev = static_cast<MPSDevice*>(device);
-        MPSMatrix* matrix = new MPSMatrix(dev, rows, cols);
+        MPSMatrixWrapper* matrix = new MPSMatrixWrapper(dev, rows, cols);
         return static_cast<mps_matrix_t>(matrix);
     } catch (...) {
         return nullptr;
@@ -172,14 +167,14 @@ mps_matrix_t mps_matrix_create(mps_device_t device, size_t rows, size_t cols) {
 
 void mps_matrix_destroy(mps_matrix_t matrix) {
     if (matrix) {
-        delete static_cast<MPSMatrix*>(matrix);
+        delete static_cast<MPSMatrixWrapper*>(matrix);
     }
 }
 
 void mps_matrix_set_data(mps_matrix_t matrix, const float* data, size_t size) {
     if (!matrix || !data) return;
     
-    MPSMatrix* mat = static_cast<MPSMatrix*>(matrix);
+    MPSMatrixWrapper* mat = static_cast<MPSMatrixWrapper*>(matrix);
     size_t bytes = mat->rows * mat->cols * sizeof(float);
     if (size * sizeof(float) != bytes) {
         NSLog(@"Size mismatch in mps_matrix_set_data");
@@ -192,7 +187,7 @@ void mps_matrix_set_data(mps_matrix_t matrix, const float* data, size_t size) {
 void mps_matrix_get_data(mps_matrix_t matrix, float* data, size_t size) {
     if (!matrix || !data) return;
     
-    MPSMatrix* mat = static_cast<MPSMatrix*>(matrix);
+    MPSMatrixWrapper* mat = static_cast<MPSMatrixWrapper*>(matrix);
     size_t bytes = mat->rows * mat->cols * sizeof(float);
     if (size * sizeof(float) != bytes) {
         NSLog(@"Size mismatch in mps_matrix_get_data");
@@ -204,12 +199,12 @@ void mps_matrix_get_data(mps_matrix_t matrix, float* data, size_t size) {
 
 size_t mps_matrix_rows(mps_matrix_t matrix) {
     if (!matrix) return 0;
-    return static_cast<MPSMatrix*>(matrix)->rows;
+    return static_cast<MPSMatrixWrapper*>(matrix)->rows;
 }
 
 size_t mps_matrix_cols(mps_matrix_t matrix) {
     if (!matrix) return 0;
-    return static_cast<MPSMatrix*>(matrix)->cols;
+    return static_cast<MPSMatrixWrapper*>(matrix)->cols;
 }
 
 // ============================================================================
@@ -222,9 +217,9 @@ void mps_matmul(mps_command_buffer_t cmd_buffer,
     if (!cmd_buffer || !a || !b || !c) return;
     
     MPSCommandBuffer* cmdBuf = static_cast<MPSCommandBuffer*>(cmd_buffer);
-    MPSMatrix* matA = static_cast<MPSMatrix*>(a);
-    MPSMatrix* matB = static_cast<MPSMatrix*>(b);
-    MPSMatrix* matC = static_cast<MPSMatrix*>(c);
+    MPSMatrixWrapper* matA = static_cast<MPSMatrixWrapper*>(a);
+    MPSMatrixWrapper* matB = static_cast<MPSMatrixWrapper*>(b);
+    MPSMatrixWrapper* matC = static_cast<MPSMatrixWrapper*>(c);
     
     // Create MPS matrix objects
     MPSMatrix* mpsA = [[MPSMatrix alloc] initWithBuffer:matA->buffer
@@ -255,9 +250,9 @@ void mps_matrix_add(mps_command_buffer_t cmd_buffer,
     if (!cmd_buffer || !a || !b || !result) return;
     
     MPSCommandBuffer* cmdBuf = static_cast<MPSCommandBuffer*>(cmd_buffer);
-    MPSMatrix* matA = static_cast<MPSMatrix*>(a);
-    MPSMatrix* matB = static_cast<MPSMatrix*>(b);
-    MPSMatrix* matResult = static_cast<MPSMatrix*>(result);
+    MPSMatrixWrapper* matA = static_cast<MPSMatrixWrapper*>(a);
+    MPSMatrixWrapper* matB = static_cast<MPSMatrixWrapper*>(b);
+    MPSMatrixWrapper* matResult = static_cast<MPSMatrixWrapper*>(result);
     
     // Use compute shader for element-wise addition
     id<MTLComputePipelineState> pipeline = nil;
@@ -318,9 +313,9 @@ void mps_matrix_mul_elementwise(mps_command_buffer_t cmd_buffer,
     if (!cmd_buffer || !a || !b || !result) return;
     
     MPSCommandBuffer* cmdBuf = static_cast<MPSCommandBuffer*>(cmd_buffer);
-    MPSMatrix* matA = static_cast<MPSMatrix*>(a);
-    MPSMatrix* matB = static_cast<MPSMatrix*>(b);
-    MPSMatrix* matResult = static_cast<MPSMatrix*>(result);
+    MPSMatrixWrapper* matA = static_cast<MPSMatrixWrapper*>(a);
+    MPSMatrixWrapper* matB = static_cast<MPSMatrixWrapper*>(b);
+    MPSMatrixWrapper* matResult = static_cast<MPSMatrixWrapper*>(result);
     
     NSError* error = nil;
     NSString* kernelSource = @R"(
@@ -372,8 +367,8 @@ void mps_matrix_transpose(mps_command_buffer_t cmd_buffer,
     if (!cmd_buffer || !input || !output) return;
     
     MPSCommandBuffer* cmdBuf = static_cast<MPSCommandBuffer*>(cmd_buffer);
-    MPSMatrix* matInput = static_cast<MPSMatrix*>(input);
-    MPSMatrix* matOutput = static_cast<MPSMatrix*>(output);
+    MPSMatrixWrapper* matInput = static_cast<MPSMatrixWrapper*>(input);
+    MPSMatrixWrapper* matOutput = static_cast<MPSMatrixWrapper*>(output);
     
     NSError* error = nil;
     NSString* kernelSource = @R"(
@@ -428,7 +423,7 @@ void mps_relu_forward(mps_command_buffer_t cmd_buffer, mps_matrix_t x) {
     if (!cmd_buffer || !x) return;
     
     MPSCommandBuffer* cmdBuf = static_cast<MPSCommandBuffer*>(cmd_buffer);
-    MPSMatrix* mat = static_cast<MPSMatrix*>(x);
+    MPSMatrixWrapper* mat = static_cast<MPSMatrixWrapper*>(x);
     
     // Create MPSImage from buffer (simplified approach using compute shader)
     NSError* error = nil;
@@ -476,7 +471,7 @@ void mps_sigmoid_forward(mps_command_buffer_t cmd_buffer, mps_matrix_t x) {
     if (!cmd_buffer || !x) return;
     
     MPSCommandBuffer* cmdBuf = static_cast<MPSCommandBuffer*>(cmd_buffer);
-    MPSMatrix* mat = static_cast<MPSMatrix*>(x);
+    MPSMatrixWrapper* mat = static_cast<MPSMatrixWrapper*>(x);
     
     NSError* error = nil;
     NSString* kernelSource = @R"(
@@ -523,7 +518,7 @@ void mps_tanh_forward(mps_command_buffer_t cmd_buffer, mps_matrix_t x) {
     if (!cmd_buffer || !x) return;
     
     MPSCommandBuffer* cmdBuf = static_cast<MPSCommandBuffer*>(cmd_buffer);
-    MPSMatrix* mat = static_cast<MPSMatrix*>(x);
+    MPSMatrixWrapper* mat = static_cast<MPSMatrixWrapper*>(x);
     
     NSError* error = nil;
     NSString* kernelSource = @R"(
@@ -581,8 +576,8 @@ void mps_linear_forward(mps_command_buffer_t cmd_buffer,
     // Add bias if provided
     if (bias) {
         MPSCommandBuffer* cmdBuf = static_cast<MPSCommandBuffer*>(cmd_buffer);
-        MPSMatrix* matOutput = static_cast<MPSMatrix*>(output);
-        MPSMatrix* matBias = static_cast<MPSMatrix*>(bias);
+        MPSMatrixWrapper* matOutput = static_cast<MPSMatrixWrapper*>(output);
+        MPSMatrixWrapper* matBias = static_cast<MPSMatrixWrapper*>(bias);
         
         NSError* error = nil;
         NSString* kernelSource = @R"(
@@ -645,8 +640,8 @@ void mps_linear_backward_weights(mps_command_buffer_t cmd_buffer,
     if (!cmd_buffer || !grad_output || !input || !grad_weights) return;
     
     // grad_weights = grad_output^T @ input
-    MPSMatrix* matGradOutput = static_cast<MPSMatrix*>(grad_output);
-    MPSMatrix* matInput = static_cast<MPSMatrix*>(input);
+    MPSMatrixWrapper* matGradOutput = static_cast<MPSMatrixWrapper*>(grad_output);
+    MPSMatrixWrapper* matInput = static_cast<MPSMatrixWrapper*>(input);
     
     // Create transposed descriptors
     mps_matrix_t grad_output_t = mps_matrix_create(
@@ -660,7 +655,7 @@ void mps_linear_backward_weights(mps_command_buffer_t cmd_buffer,
     // Compute grad_bias if provided
     if (grad_bias) {
         MPSCommandBuffer* cmdBuf = static_cast<MPSCommandBuffer*>(cmd_buffer);
-        MPSMatrix* matGradBias = static_cast<MPSMatrix*>(grad_bias);
+        MPSMatrixWrapper* matGradBias = static_cast<MPSMatrixWrapper*>(grad_bias);
         
         NSError* error = nil;
         NSString* kernelSource = @R"(
@@ -755,9 +750,9 @@ void mps_conv2d_forward(mps_command_buffer_t cmd_buffer,
     
     MPSCommandBuffer* cmdBuf = static_cast<MPSCommandBuffer*>(cmd_buffer);
     MPSConvDescriptor* convDesc = static_cast<MPSConvDescriptor*>(desc);
-    MPSMatrix* matInput = static_cast<MPSMatrix*>(input);
-    MPSMatrix* matWeights = static_cast<MPSMatrix*>(weights);
-    MPSMatrix* matOutput = static_cast<MPSMatrix*>(output);
+    MPSMatrixWrapper* matInput = static_cast<MPSMatrixWrapper*>(input);
+    MPSMatrixWrapper* matWeights = static_cast<MPSMatrixWrapper*>(weights);
+    MPSMatrixWrapper* matOutput = static_cast<MPSMatrixWrapper*>(output);
     
     // Create MPS convolution descriptor
     MPSCNNConvolutionDescriptor* cnnDesc = [MPSCNNConvolutionDescriptor
@@ -847,10 +842,10 @@ void mps_adam_step(mps_command_buffer_t cmd_buffer,
     if (!cmd_buffer || !weights || !gradients || !m || !v) return;
     
     MPSCommandBuffer* cmdBuf = static_cast<MPSCommandBuffer*>(cmd_buffer);
-    MPSMatrix* matWeights = static_cast<MPSMatrix*>(weights);
-    MPSMatrix* matGradients = static_cast<MPSMatrix*>(gradients);
-    MPSMatrix* matM = static_cast<MPSMatrix*>(m);
-    MPSMatrix* matV = static_cast<MPSMatrix*>(v);
+    MPSMatrixWrapper* matWeights = static_cast<MPSMatrixWrapper*>(weights);
+    MPSMatrixWrapper* matGradients = static_cast<MPSMatrixWrapper*>(gradients);
+    MPSMatrixWrapper* matM = static_cast<MPSMatrixWrapper*>(m);
+    MPSMatrixWrapper* matV = static_cast<MPSMatrixWrapper*>(v);
     
     NSError* error = nil;
     NSString* kernelSource = @R"(
@@ -949,7 +944,7 @@ void mps_matrix_zero(mps_command_buffer_t cmd_buffer, mps_matrix_t matrix) {
     if (!cmd_buffer || !matrix) return;
     
     MPSCommandBuffer* cmdBuf = static_cast<MPSCommandBuffer*>(cmd_buffer);
-    MPSMatrix* mat = static_cast<MPSMatrix*>(matrix);
+    MPSMatrixWrapper* mat = static_cast<MPSMatrixWrapper*>(matrix);
     
     id<MTLBlitCommandEncoder> blitEncoder = [cmdBuf->buffer blitCommandEncoder];
     [blitEncoder fillBuffer:mat->buffer
@@ -963,8 +958,8 @@ void mps_matrix_copy(mps_command_buffer_t cmd_buffer,
     if (!cmd_buffer || !src || !dst) return;
     
     MPSCommandBuffer* cmdBuf = static_cast<MPSCommandBuffer*>(cmd_buffer);
-    MPSMatrix* matSrc = static_cast<MPSMatrix*>(src);
-    MPSMatrix* matDst = static_cast<MPSMatrix*>(dst);
+    MPSMatrixWrapper* matSrc = static_cast<MPSMatrixWrapper*>(src);
+    MPSMatrixWrapper* matDst = static_cast<MPSMatrixWrapper*>(dst);
     
     size_t bytes = matSrc->rows * matSrc->cols * sizeof(float);
     
@@ -983,9 +978,9 @@ void mps_mse_gradient(mps_command_buffer_t cmd_buffer,
     if (!cmd_buffer || !predictions || !targets || !grad_output) return;
     
     MPSCommandBuffer* cmdBuf = static_cast<MPSCommandBuffer*>(cmd_buffer);
-    MPSMatrix* matPredictions = static_cast<MPSMatrix*>(predictions);
-    MPSMatrix* matTargets = static_cast<MPSMatrix*>(targets);
-    MPSMatrix* matGradOutput = static_cast<MPSMatrix*>(grad_output);
+    MPSMatrixWrapper* matPredictions = static_cast<MPSMatrixWrapper*>(predictions);
+    MPSMatrixWrapper* matTargets = static_cast<MPSMatrixWrapper*>(targets);
+    MPSMatrixWrapper* matGradOutput = static_cast<MPSMatrixWrapper*>(grad_output);
     
     NSError* error = nil;
     NSString* kernelSource = @R"(
